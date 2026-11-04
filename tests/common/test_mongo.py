@@ -5,14 +5,9 @@ from app.common import mongo
 
 
 @pytest.fixture(autouse=True)
-def reset_mongo_client():
-    original_client = mongo.client
-    original_db = mongo.db
-    mongo.client = None
-    mongo.db = None
-    yield
-    mongo.client = original_client
-    mongo.db = original_db
+def reset_mongo_client(monkeypatch):
+    monkeypatch.setattr(mongo, "client", None)
+    monkeypatch.setattr(mongo, "db", None)
 
 
 async def test_get_mongo_client_initialization(mocker):
@@ -59,9 +54,9 @@ async def test_get_mongo_client_with_custom_tls(mocker):
     )
 
 
-async def test_get_mongo_client_returns_existing(mocker):
+async def test_get_mongo_client_returns_existing(mocker, monkeypatch):
     existing_client = mocker.Mock()
-    mongo.client = existing_client
+    monkeypatch.setattr(mongo, "client", existing_client)
 
     mock_client_cls = mocker.patch("app.common.mongo.pymongo.AsyncMongoClient")
 
