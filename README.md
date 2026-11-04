@@ -12,6 +12,9 @@ This is work-in-progress. See [To Do List](./TODO.md)
     - [Development](#development)
     - [Testing](#testing)
     - [Production Mode](#production-mode)
+  - [Where code goes](#where-code-goes)
+    - [Schemas and models](#schemas-and-models)
+    - [Ids](#ids)
   - [API endpoints](#api-endpoints)
   - [Custom Cloudwatch Metrics](#custom-cloudwatch-metrics)
   - [Pipelines](#pipelines)
@@ -24,7 +27,7 @@ This is work-in-progress. See [To Do List](./TODO.md)
 
 ### Python
 
-Please install python `>= 3.12` and `pipx` in your environment. This template uses [uv](https://github.com/astral-sh/uv) to manage the environment and dependencies.
+Please install python `>= 3.14` (see `.python-version`) and `pipx` in your environment. This project uses [uv](https://github.com/astral-sh/uv) to manage the environment and dependencies.
 
 ```python
 # install uv via pipx
@@ -44,13 +47,49 @@ This opinionated template uses the [`Fast API`](https://fastapi.tiangolo.com/) P
 
 ### Environment Variable Configuration
 
-The application uses Pydantic's `BaseSettings` for configuration management in `app/config.py`, automatically mapping environment variables to configuration fields.
+The application uses Pydantic's `BaseSettings` for configuration management in `app/config.py`, automatically mapping environment variables to configuration fields. Configuration is loaded using `python-dotenv` which supports both `.env` files and environment variables.
 
-In CDP, environment variables and secrets need to be set using CDP conventions.  See links below:
+In CDP, environment variables and secrets need to be set using CDP conventions. See links below:
 - [CDP App Config](https://github.com/DEFRA/cdp-documentation/blob/main/how-to/config.md)
 - [CDP Secrets](https://github.com/DEFRA/cdp-documentation/blob/main/how-to/secrets.md)
 
 For local development - see [instructions below](#local-development).
+
+#### Bedrock Configuration
+
+The application uses AWS Bedrock for LLM access. The following environment variables are required:
+
+| Variable | Description | Example |
+| --- | --- | --- |
+| `AWS_REGION` | AWS region for Bedrock service | `eu-west-2` |
+| `AWS_ACCESS_KEY_ID` | AWS access key ID | Set via CDP secrets |
+| `AWS_SECRET_ACCESS_KEY` | AWS secret access key | Set via CDP secrets |
+| `CLAUDE_SONNET_MODEL_CONFIG` | Bedrock model configuration | `anthropic.claude-sonnet-4-6,arn:aws:bedrock:eu-west-2:123456789012:application-inference-profile/fake-profile-test` |
+
+The `CLAUDE_SONNET_MODEL_CONFIG` format is: `model_id,inference_profile[,guardrail_id:guardrail_version]`
+
+#### Reference Data Configuration
+
+The `/reference/*` endpoints (see [API endpoints](#api-endpoints)) serve the option lists for the
+metadata capture journey's radio/checkbox questions. Each list is config/env-var driven only - no
+database, no admin UI. The following environment variables are **required**; like
+`CLAUDE_SONNET_MODEL_CONFIG`, the application refuses to start if one is missing or malformed:
+
+| Variable | Description | Example |
+| --- | --- | --- |
+| `REFERENCE_SCHEMES` | Options for "Which scheme does this guidance relate to?" | `basic-payment-scheme:Basic Payment Scheme,not-specific:Not scheme-specific` |
+| `REFERENCE_AUDIENCES` | Options for "Who is this for?" | `caseworker:Caseworker,customer:Customer` |
+| `REFERENCE_SYSTEMS` | Options for "What systems does this guidance relate to?" | `siti-agri:Siti Agri,crm:CRM` |
+| `REFERENCE_GUIDANCE_TYPES` | Options for the guidance type question | `process-guide:Process guide` |
+
+Guides are stored, and filtered on, by these keys, but `GET /guides` and `GET /guides/{id}` answer
+with each key replaced by its label in `metadata.schemes`, `systems`, `audience` and `guidanceType`,
+so a reader needs no call to `/reference/*` to display them. A key no longer in the list is shown
+as it is, and a scheme of `none` reads "Not scheme-specific".
+
+Each variable's format is a comma-separated list of `value:label` pairs, in display order. Each
+endpoint returns that list unchanged, as `[{"value": ..., "label": ...}, ...]` - see `/docs` for the
+generated OpenAPI schema.
 
 ### Linting and Formatting
 
@@ -135,11 +174,10 @@ See the `Dockerfile` and `compose.yml` for details
 
 Follow the convention below for environment variables and secrets in local development.
 
-**Note** that it does not use `.env` or `python-dotenv` as this is not the convention in the CDP environment.
+**Environment variables:** `.env` file in the project root.
 
-**Environment variables:** `compose/aws.env`.
-
-**Secrets:** `compose/secrets.env`. You need to create this, as it's excluded from version control.
+**Compose directory:** The `compose/` directory contains helper scripts and environment configurations:
+- `compose/floci/start.d/10-setup-resources.sh` - This script is used to set up the necessary AWS resources in the local Floci environment. It runs when the Floci container starts, ensuring that your local AWS environment is ready for development.
 
 **Libraries:** Ensure the python virtual environment is configured and libraries are installed using `uv sync`, [as above](#python)
 
@@ -147,34 +185,31 @@ Follow the convention below for environment variables and secrets in local devel
 
 ### Development
 
-This app can be run locally by either using the Docker Compose project or via the provided script `scripts/start_dev_server.sh`.
+This app can be run locally by either using the Docker Compose project or project scripts.
 
 #### Using Docker Compose
 
 To run the application using Docker Compose, you can use the following command:
 
 ```bash
-docker compose --profile service up --build
+docker compose up --build
 ```
 
 If you want to enable hot-reloading, you can press the `w` key once the compose project is running to enable `watch` mode.
 
-#### Using the provided script
+#### Running on the host
 
-To run the application using the provided script, you can execute:
+To run the application directly on the host with its dependencies in Docker:
 
 ```bash
-./scripts/start_dev_server.sh
+# start the dependencies only
+docker compose up -d floci mongodb redis
+
+# start the application
+uv run --env-file .env rpa-ai-guidance-hub-search
 ```
 
-This script will:
-
-- Check if Docker is running
-- Start dependent services with Docker Compose (Localstack, MongoDB)
-- Set up environment variables for local development
-- Load configuration from compose/aws.env and compose/secrets.env
-- Verify the Python virtual environment is set up
-- Start the FastAPI application with hot-reload enabled
+This loads configuration from `.env`, and enables hot-reload when `PYTHON_ENV=development`.
 
 The service will then run on `http://localhost:8085`
 
@@ -190,15 +225,63 @@ To test the application run:
 uv run pytest
 ```
 
+## Where code goes
+
+### Schemas and models
+
+Each layer knows only the one directly below it:
+
+```text
+HTTP JSON  <-  schemas.py   Pydantic: from_model() and conversions to models
+                   |
+               models.py    dataclasses and enums: to_document() / from_document()
+                   |
+               Mongo record (a dict)
+```
+
+- **`schemas.py`** holds the shapes that cross the HTTP boundary: request bodies,
+  response bodies, and payloads other services send us (such as cdp-uploader's
+  callback). They are Pydantic, which validates them, writes them into the OpenAPI
+  document and spells them in camelCase on the wire. A schema converts to and from
+  models, and knows nothing of how anything is stored.
+- **`models.py`** holds what the service works with: plain dataclasses and enums,
+  with no HTTP in them. A model converts itself to and from the record Mongo stores
+  (`to_document()` and `from_document()`), so the stored field names are written
+  down once. A model never imports a schema.
+- **Routers** only call the conversions; they don't build shapes themselves.
+- The role decides the file, not the library: `AppConfig` is Pydantic and lives in
+  `config.py`.
+
+### Ids
+
+`app/guidance/ids.py` gives each kind of id a type of its own (`typing.NewType`), so
+mypy refuses one where another belongs:
+
+- **Ours**, `DocumentId` and `VersionId`, are uuids, version 7 (time-ordered), minted
+  only by `new_document_id()` and `new_version_id()`. Mongo stores them as native
+  uuids; they become text only as an S3 prefix or on the wire, where the OpenAPI
+  document says `format: uuid`. A path id that isn't a uuid is refused with 422.
+- **Other services'**, cdp-uploader's `UploadId` and `FileId`, are `str`: taken as
+  given, not claimed to be uuids. So is the signed-in user's id.
+
 ## API endpoints
 
-| Endpoint             | Description                    |
-| :------------------- | :----------------------------- |
-| `GET: /docs`         | Automatic API Swagger docs     |
-| `GET: /health`       | Health check endpoint          |
-| `GET: /example/test` | Simple example endpoint        |
-| `GET: /example/db`   | Database query example         |
-| `GET: /example/http` | HTTP client example            |
+| Endpoint                        | Description                    |
+|:--------------------------------| :----------------------------- |
+| `GET: /docs`                    | Automatic API Swagger docs (the same document is committed as `docs/openapi.json`; regenerate with `uv run task openapi`) |
+| `GET: /health`                  | Health check endpoint          |
+| `GET: /reference/schemes`       | Scheme options for the "Which scheme does this guidance relate to?" radios |
+| `GET: /reference/audiences`     | Audience options for the "Who is this for?" checkboxes |
+| `GET: /reference/systems`       | System options for the "What systems...?" checkboxes |
+| `GET: /reference/guidance-types`| Guidance type options |
+| `GET: /review/assets`           | Simple example endpoint        |
+| `GET: /guides`                  | A page of guides, newest first; `limit`, `cursor`, and repeatable `scheme`, `system`, `audience`, `guidance_type` filters |
+| `POST: /guides`                 | Creates a guide (201)          |
+| `GET: /guides/{id}`             | A guide and all its versions   |
+| `GET: /guides/{id}/content`     | The Markdown of a guide's newest version, as plain text |
+| `GET: /guides/{id}/assets/{name}` | Gets asset content by name   |
+| `POST: /guides/staging/callback` | cdp-uploader callback for an uploaded file (202; processed in the background) |
+| `GET: /guides/staging/{file_id}` | Conversion outcome of a staged file (404 if unknown) |
 
 ## Custom Cloudwatch Metrics
 
