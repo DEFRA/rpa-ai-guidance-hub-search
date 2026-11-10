@@ -113,8 +113,10 @@ class TestAMalformedChunkSet:
         lines = _lines()
         lines[line] = {**lines[line], field: value}
 
+        text = _text(lines)
+
         with pytest.raises(chunk_sets.MalformedChunkSetError, match=message):
-            chunk_sets.loads(_text(lines))
+            chunk_sets.loads(text)
 
     def test_is_never_made(self):
         out_of_order = (dataclasses.replace(CHUNKS[0], ordinal=5), *CHUNKS[1:])

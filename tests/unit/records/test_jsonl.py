@@ -130,16 +130,20 @@ class TestAMalformedSectionFile:
         lines = _lines()
         lines[line] = {**lines[line], field: value}
 
+        text = _text(lines)
+
         with pytest.raises(jsonl.MalformedSectionFileError, match=message):
-            jsonl.loads(_text(lines))
+            jsonl.loads(text)
 
     def test_refuses_block_lines_that_are_not_an_array(self):
         lines = _lines()
         block = {**lines[1]["blocks"][0], "lines": "hello"}
         lines[1] = {**lines[1], "blocks": [block]}
 
+        text = _text(lines)
+
         with pytest.raises(jsonl.MalformedSectionFileError, match="lines must be"):
-            jsonl.loads(_text(lines))
+            jsonl.loads(text)
 
     def test_is_never_written(self):
         out_of_order = [dataclasses.replace(SECTIONS[0], ordinal=5), *SECTIONS[1:]]
