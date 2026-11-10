@@ -1,0 +1,313 @@
+"""Contract for every `ChunkIndex`. Subclass it and override `chunk_index`.
+
+Asserts relative order only; scores differ between engines.
+"""
+
+import dataclasses
+import uuid
+from typing import Any
+
+import pytest
+
+from app.index import chunk_index as chunk_index_module
+from app.records import ids, models
+from tests.support import chunks as fixtures
+
+Section = fixtures.Section
+PUBLISHED = frozenset({models.DocumentStatus.PUBLISHED})
+EVERY_STATUS = frozenset(models.DocumentStatus)
+
+OTHER_DOCUMENT_ID = ids.DocumentId(uuid.UUID("0199b8a2-0000-7000-8000-0000000000aa"))
+OTHER_VERSION_ID = ids.VersionId(uuid.UUID("0199b8a2-0000-7000-8000-0000000000ab"))
+NEXT_VERSION_ID = ids.VersionId(uuid.UUID("0199b8a2-0000-7000-8000-0000000000ac"))
+
+CLAIMS = fixtures.document(
+    [
+        Section("1 Overview", 1, ("Read this before making a claim for livestock.",)),
+        Section("2 Eligibility", 1, ("Applicants must hold a holding number.",)),
+        Section("2.1 Hedgerows", 2, ("Payments for maintaining boundaries.",)),
+    ],
+)
+
+DRAFT = fixtures.document(
+    [Section("1 Woodland", 1, ("Woodland grants and felling licences.",))],
+    fixtures.header(
+        document_id=OTHER_DOCUMENT_ID,
+        version_id=OTHER_VERSION_ID,
+        status=models.DocumentStatus.READY_FOR_PUBLISH,
+        title="Woodland Guidance",
+    ),
+)
+
+
+def _query(
+    text: str,
+    statuses: frozenset[models.DocumentStatus] = EVERY_STATUS,
+    **page: Any,
+) -> chunk_index_module.ChunkQuery:
+    return chunk_index_module.ChunkQuery(text=text, statuses=statuses, **page)
+
+
+def _titles(
+    text: str,
+    statuses: frozenset[models.DocumentStatus] = EVERY_STATUS,
+    limit: int = 10,
+) -> chunk_index_module.TitleQuery:
+    return chunk_index_module.TitleQuery(text=text, statuses=statuses, limit=limit)
+
+
+async def _found(
+    index: chunk_index_module.ChunkIndex,
+    query: chunk_index_module.ChunkQuery,
+) -> list[tuple[str, ...]]:
+    return [hit.heading_path for hit in (await index.search(query)).hits]
+
+
+class ChunkIndexContract:
+    @pytest.fixture
+    def chunk_index(self) -> chunk_index_module.ChunkIndex:
+        raise NotImplementedError
+
+    async def test_finds_a_replaced_document(self, chunk_index):
+        await chunk_index.replace_document(*CLAIMS)
+
+        assert await _found(chunk_index, _query("holding")) == [("Eligibility",)]
+
+    async def test_returns_what_a_hit_needs_to_be_shown_and_linked(self, chunk_index):
+        header, chunks = CLAIMS
+        await chunk_index.replace_document(header, chunks)
+
+        (hit,) = (await chunk_index.search(_query("hedgerows"))).hits
+
+        assert (
+            hit.section_id,
+            hit.chunk_id,
+            hit.document_id,
+            hit.version_id,
+            hit.title,
+            hit.status,
+            hit.heading_path,
+            hit.section_number,
+            hit.anchor,
+            hit.plain_text,
+            hit.exact,
+        ) == (
+            chunks[2].section_id,
+            chunks[2].chunk_id,
+            header.document_id,
+            header.version_id,
+            "Claims Guidance",
+            models.DocumentStatus.PUBLISHED,
+            ("Eligibility", "Hedgerows"),
+            "2.1",
+            "21-hedgerows",
+            "Payments for maintaining boundaries.",
+            True,
+        )
+
+    async def test_keeps_only_the_latest_replacement_of_a_document(self, chunk_index):
+        await chunk_index.replace_document(*CLAIMS)
+        next_version = fixtures.document(
+            [Section("1 Overview", 1, ("Rewritten guidance on orchards.",))],
+            fixtures.header(version_id=NEXT_VERSION_ID),
+        )
+
+        await chunk_index.replace_document(*next_version)
+
+        assert await _found(chunk_index, _query("holding")) == []
+        (hit,) = (await chunk_index.search(_query("orchards"))).hits
+        assert hit.version_id == NEXT_VERSION_ID
+
+    async def test_replacing_with_the_same_chunks_changes_nothing(self, chunk_index):
+        await chunk_index.replace_document(*CLAIMS)
+        once = await chunk_index.search(_query("holding"))
+
+        await chunk_index.replace_document(*CLAIMS)
+
+        assert await chunk_index.search(_query("holding")) == once
+
+    async def test_replacing_with_no_chunks_removes_the_document(self, chunk_index):
+        header, _ = CLAIMS
+        await chunk_index.replace_document(*CLAIMS)
+
+        await chunk_index.replace_document(header, [])
+
+        assert await _found(chunk_index, _query("holding")) == []
+        assert await chunk_index.search_titles(_titles("Claims Guidance")) == []
+
+    async def test_removes_a_document_and_leaves_the_others(self, chunk_index):
+        await chunk_index.replace_document(*CLAIMS)
+        await chunk_index.replace_document(*DRAFT)
+
+        await chunk_index.remove_document(CLAIMS[0].document_id)
+
+        assert await _found(chunk_index, _query("holding")) == []
+        assert await _found(chunk_index, _query("woodland")) == [("Woodland",)]
+        titles = await chunk_index.search_titles(_titles("Claims Guidance"))
+        assert CLAIMS[0].document_id not in {hit.document_id for hit in titles}
+
+    async def test_removing_an_absent_document_is_fine(self, chunk_index):
+        await chunk_index.remove_document(OTHER_DOCUMENT_ID)
+
+        assert await _found(chunk_index, _query("woodland")) == []
+
+    async def test_finds_only_the_statuses_asked_for(self, chunk_index):
+        await chunk_index.replace_document(*CLAIMS)
+        await chunk_index.replace_document(*DRAFT)
+
+        assert await _found(chunk_index, _query("woodland", PUBLISHED)) == []
+        assert await _found(chunk_index, _query("woodland")) == [("Woodland",)]
+
+    async def test_pages_by_limit_and_offset_and_counts_every_match(self, chunk_index):
+        header, chunks = CLAIMS
+        await chunk_index.replace_document(
+            header,
+            [dataclasses.replace(chunk, plain_text="shared word") for chunk in chunks],
+        )
+
+        first = await chunk_index.search(_query("shared", limit=2))
+        rest = await chunk_index.search(_query("shared", limit=2, offset=2))
+
+        assert (len(first.hits), first.total) == (2, 3)
+        assert (len(rest.hits), rest.total) == (1, 3)
+        assert {hit.section_id for hit in first.hits + rest.hits} == {
+            chunk.section_id for chunk in chunks
+        }
+
+    @pytest.mark.parametrize(
+        ("tag", "found"),
+        [
+            pytest.param(fixtures.DOCUMENT_ID, [("Eligibility",)], id="document"),
+            pytest.param(fixtures.VERSION_ID, [("Eligibility",)], id="version"),
+            pytest.param(NEXT_VERSION_ID, [], id="not-indexed"),
+        ],
+    )
+    async def test_searches_inside_one_document_or_version(
+        self, chunk_index, tag, found
+    ):
+        await chunk_index.replace_document(*CLAIMS)
+        await chunk_index.replace_document(
+            *fixtures.document(
+                [Section("1 Holding", 1, ("Woodland holding numbers.",))],
+                DRAFT[0],
+            ),
+        )
+
+        assert await _found(chunk_index, _query("holding", tag=tag)) == found
+
+    async def test_returns_one_hit_per_section_from_its_best_chunk(self, chunk_index):
+        header, chunks = fixtures.document(
+            [Section("1 Overview", 1, ("One hedgerow.", "A hedgerow and a hedgerow."))],
+        )
+        await chunk_index.replace_document(header, chunks)
+
+        (hit,) = (await chunk_index.search(_query("hedgerow"))).hits
+
+        assert hit.chunk_id == chunks[1].chunk_id
+
+    async def test_ranks_a_heading_match_above_a_body_only_match(self, chunk_index):
+        header, chunks = fixtures.document(
+            [
+                Section("1 Overview", 1, ("Hedgerows may be cut in winter.",)),
+                Section("2 Hedgerows", 1, ("Rules for boundaries.",)),
+            ],
+        )
+        await chunk_index.replace_document(header, chunks)
+
+        assert await _found(chunk_index, _query("hedgerows")) == [
+            ("Hedgerows",),
+            ("Overview",),
+        ]
+
+    @pytest.mark.parametrize(
+        ("body", "text", "found"),
+        [
+            pytest.param("Repayment schedules.", "pay", True, id="inside-a-word"),
+            pytest.param("REPAYMENT SCHEDULES.", "repay", True, id="any-case"),
+            pytest.param("Hold a holding number.", "a holding", True, id="phrase"),
+            pytest.param("Holding a number.", "a holding", False, id="word-order"),
+            pytest.param("Make a claim\nfor stock.", "claim for", False, id="blocks"),
+            pytest.param("Make a claim for stock.", "claim for", True, id="one-block"),
+            pytest.param("Rules for an area.", "an", True, id="short-whole-word"),
+            pytest.param("Planting rules.", "an", False, id="short-inside-word"),
+        ],
+    )
+    async def test_matches_like_find_in_a_word_processor(
+        self,
+        chunk_index,
+        body,
+        text,
+        found,
+    ):
+        await chunk_index.replace_document(
+            *fixtures.document([Section("1 Overview", 1, (body,))]),
+        )
+
+        assert bool(await _found(chunk_index, _query(text))) is found
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            pytest.param("", id="empty"),
+            pytest.param("   ", id="blank"),
+            pytest.param("Can I claim for hedgerows?", id="question"),
+            pytest.param('"unbalanced quote', id="quote"),
+            pytest.param("title:hedgerows", id="field-prefix"),
+            pytest.param("hedgerows AND OR NOT", id="operators"),
+            pytest.param("hedge* (rows", id="wildcard-and-bracket"),
+            pytest.param("4.2.1:", id="clause-colon"),
+        ],
+    )
+    async def test_never_fails_on_what_a_person_types(self, chunk_index, text):
+        await chunk_index.replace_document(*CLAIMS)
+
+        hits = await chunk_index.search(_query(text))
+
+        assert hits.total == len(hits.hits)
+
+    async def test_finds_nothing_for_an_empty_query(self, chunk_index):
+        await chunk_index.replace_document(*CLAIMS)
+
+        assert await chunk_index.search(_query("")) == chunk_index_module.SectionHits(
+            hits=(),
+            total=0,
+        )
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            pytest.param("Clams Guidanse", id="typos"),
+            pytest.param("Guidance Claims", id="word-order"),
+            pytest.param("claims guidance", id="any-case"),
+        ],
+    )
+    async def test_finds_a_title_despite(self, chunk_index, text):
+        await chunk_index.replace_document(*CLAIMS)
+        await chunk_index.replace_document(*DRAFT)
+
+        hits = await chunk_index.search_titles(_titles(text))
+
+        assert hits[0].document_id == fixtures.DOCUMENT_ID
+
+    async def test_finds_only_titles_of_the_statuses_asked_for(self, chunk_index):
+        await chunk_index.replace_document(*DRAFT)
+
+        assert await chunk_index.search_titles(_titles("Woodland", PUBLISHED)) == []
+        (hit,) = await chunk_index.search_titles(_titles("Woodland Guidance"))
+        assert (hit.document_id, hit.version_id, hit.title, hit.status) == (
+            OTHER_DOCUMENT_ID,
+            OTHER_VERSION_ID,
+            "Woodland Guidance",
+            models.DocumentStatus.READY_FOR_PUBLISH,
+        )
+
+    async def test_finds_no_title_for_something_unlike_any(self, chunk_index):
+        await chunk_index.replace_document(*CLAIMS)
+
+        assert await chunk_index.search_titles(_titles("zzzz qqqq")) == []
+
+    async def test_returns_at_most_the_title_limit(self, chunk_index):
+        await chunk_index.replace_document(*CLAIMS)
+        await chunk_index.replace_document(*DRAFT)
+
+        assert len(await chunk_index.search_titles(_titles("Guidance", limit=1))) <= 1
