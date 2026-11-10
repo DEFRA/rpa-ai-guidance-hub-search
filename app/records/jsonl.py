@@ -110,17 +110,7 @@ def _check(
     sections: Sequence[models.SectionRecord],
 ) -> None:
     for position, section in enumerate(sections):
-        if (
-            section.document_id,
-            section.version_id,
-            section.status,
-            section.source_type,
-        ) != (
-            header.document_id,
-            header.version_id,
-            header.status,
-            header.source_type,
-        ):
+        if not _belongs_to(section, header):
             msg = (
                 f"section {section.section_id} does not belong to the header's version"
             )
@@ -129,3 +119,13 @@ def _check(
         if section.ordinal != position:
             msg = f"expected ordinal {position}, got {section.ordinal}"
             raise MalformedSectionFileError(msg)
+
+
+def _belongs_to(section: models.SectionRecord, header: models.DocumentHeader) -> bool:
+    """Whether the section carries the same version identity as the header."""
+    return (
+        section.document_id == header.document_id
+        and section.version_id == header.version_id
+        and section.status == header.status
+        and section.source_type == header.source_type
+    )
