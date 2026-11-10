@@ -107,6 +107,99 @@ class TestSearchingWords:
         assert "found 1 sections" in caplog.text
 
 
+OTHER_ID = fixtures.DOCUMENT_ID.__class__("0199b8a2-0000-7000-8000-0000000000bb")
+OTHER = fixtures.document(
+    [
+        Section("1 Fees", 1, ("Livestock fees are due.",)),
+        Section("2 Refunds", 1, ("Livestock refunds take a month.",)),
+        Section("3 Appeals", 1, ("Livestock appeals go to a panel.",)),
+    ],
+    fixtures.header(document_id=OTHER_ID, title="Fees Guidance"),
+)
+
+
+def _documents(text, role=routing.Role.VIEWER, **page):
+    return service.DocumentSearch(text=text, role=role, **page)
+
+
+class TestSearchingDocuments:
+    @pytest.fixture
+    async def index(self, index):
+        await index.replace_document(*OTHER)
+        return index
+
+    async def test_groups_each_documents_sections(self, search):
+        results = await search.search_documents(_documents("livestock"))
+
+        assert (results.total, results.section_total) == (2, 4)
+        assert {
+            result.sections[0].hit.title: result.section_total
+            for result in results.results
+        } == {"Claims Guidance": 1, "Fees Guidance": 3}
+
+    async def test_ranks_documents_by_their_best_section(self, search, index):
+        header, chunks = OTHER
+        await index.replace_document(
+            header,
+            [
+                dataclasses.replace(chunk, plain_text="livestock livestock livestock")
+                if index_ == 0
+                else chunk
+                for index_, chunk in enumerate(chunks)
+            ],
+        )
+
+        results = await search.search_documents(_documents("livestock"))
+
+        assert [r.sections[0].hit.title for r in results.results] == [
+            "Fees Guidance",
+            "Claims Guidance",
+        ]
+
+    async def test_gives_at_most_the_sections_asked_for(self, search):
+        results = await search.search_documents(_documents("livestock", sections=2))
+
+        (fees,) = [
+            r for r in results.results if r.sections[0].hit.title == "Fees Guidance"
+        ]
+        assert (len(fees.sections), fees.section_total) == (2, 3)
+        assert all(section.excerpt.matches for section in fees.sections)
+
+    async def test_pages_documents_not_sections(self, search):
+        first = await search.search_documents(_documents("livestock", limit=1))
+        second = await search.search_documents(
+            _documents("livestock", limit=1, offset=1),
+        )
+
+        assert (first.total, len(first.results), len(second.results)) == (2, 1, 1)
+        assert first.results[0].sections[0].hit.document_id != (
+            second.results[0].sections[0].hit.document_id
+        )
+
+    async def test_searches_inside_one_document(self, search):
+        results = await search.search_documents(
+            _documents("livestock", tag=OTHER_ID),
+        )
+
+        assert (results.total, results.section_total) == (1, 3)
+
+    async def test_refuses_more_than_the_most_matches(self, mocker, search):
+        mocker.patch.object(service, "MAX_MATCHES", 3)
+
+        with pytest.raises(service.TooManyMatchesError) as raised:
+            await search.search_documents(_documents("livestock"))
+
+        assert raised.value.total == 4
+
+    async def test_never_logs_what_was_typed(self, search, caplog):
+        caplog.set_level(logging.INFO)
+
+        await search.search_documents(_documents("livestock"))
+
+        assert "livestock" not in caplog.text.casefold()
+        assert "found 4 sections in 2 documents" in caplog.text
+
+
 class TestSearchingTitles:
     async def test_finds_close_titles_the_role_may_see(self, search):
         results = await search.search_titles(

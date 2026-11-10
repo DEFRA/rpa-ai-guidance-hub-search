@@ -117,6 +117,60 @@ class TestWordSearch:
         }
 
 
+class TestDocumentSearch:
+    def test_answers_with_documents_and_their_sections(self, client):
+        header, chunks = CLAIMS
+
+        response = client.get(
+            "/v1/search",
+            params={"q": "ver", "group": "document", "sections": 1},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert (body["total"], body["sectionTotal"], body["tooManyMatches"]) == (
+            1,
+            2,
+            False,
+        )
+        (document,) = body["results"]
+        assert {key: value for key, value in document.items() if key != "sections"} == {
+            "documentId": str(header.document_id),
+            "documentTitle": "Claims Guidance",
+            "versionId": str(header.version_id),
+            "status": "published",
+            "url": f"/guides/{header.document_id}",
+            "sectionTotal": 2,
+        }
+        (section,) = document["sections"]
+        assert section["id"] in {chunk.section_id for chunk in chunks}
+        assert section["snippet"]
+
+    def test_searches_inside_one_document(self, client):
+        response = client.get(
+            "/v1/search",
+            params={"q": "who", "group": "document", "tag": str(fixtures.DOCUMENT_ID)},
+        )
+
+        (document,) = response.json()["results"]
+        assert [section["heading"] for section in document["sections"]] == ["Scope"]
+
+    def test_says_when_there_are_too_many_matches(self, client, mocker):
+        mocker.patch.object(service, "MAX_MATCHES", 0)
+
+        response = client.get("/v1/search", params={"q": "land", "group": "document"})
+
+        assert response.status_code == 200
+        assert response.json() | {"queryId": "x"} == {
+            "queryId": "x",
+            "total": 0,
+            "sectionTotal": 1,
+            "results": [],
+            "tooManyMatches": True,
+            "message": "Too many matches. Be more specific.",
+        }
+
+
 class TestTitleSearch:
     def test_finds_a_title_despite_typos(self, client):
         response = client.get("/v1/search", params={"title": "Clams Guidanse"})
@@ -148,6 +202,13 @@ class TestBadRequests:
             pytest.param({"q": "land", "offset": -1}, id="negative-offset"),
             pytest.param({"q": "land", "tag": "not-a-uuid"}, id="bad-tag"),
             pytest.param({"q": "x" * 501}, id="too-long"),
+            pytest.param({"q": "land", "group": "section"}, id="unknown-group"),
+            pytest.param({"title": "Claims", "group": "document"}, id="group-titles"),
+            pytest.param({"q": "land", "group": "document", "sections": 0}, id="none"),
+            pytest.param(
+                {"q": "land", "group": "document", "sections": 21},
+                id="too-many-sections",
+            ),
         ],
     )
     def test_are_refused(self, client, params):

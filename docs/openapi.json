@@ -37,12 +37,120 @@
         "title": "Accepted",
         "type": "object"
       },
+      "DocumentResult": {
+        "description": "One document holding the words, with its best sections.",
+        "properties": {
+          "documentId": {
+            "format": "uuid",
+            "title": "Documentid",
+            "type": "string"
+          },
+          "documentTitle": {
+            "title": "Documenttitle",
+            "type": "string"
+          },
+          "sectionTotal": {
+            "description": "Every matching section in the document, not just those given",
+            "title": "Sectiontotal",
+            "type": "integer"
+          },
+          "sections": {
+            "description": "At most `sections` of them, best first",
+            "items": {
+              "$ref": "#/components/schemas/SectionResult"
+            },
+            "title": "Sections",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DocumentStatus"
+          },
+          "url": {
+            "description": "Where a reader views the document",
+            "title": "Url",
+            "type": "string"
+          },
+          "versionId": {
+            "format": "uuid",
+            "title": "Versionid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documentId",
+          "documentTitle",
+          "versionId",
+          "status",
+          "url",
+          "sectionTotal",
+          "sections"
+        ],
+        "title": "DocumentResult",
+        "type": "object"
+      },
+      "DocumentSearchResponse": {
+        "description": "Word search with `group=document`: a page of documents, best first.",
+        "properties": {
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "queryId": {
+            "title": "Queryid",
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentResult"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "sectionTotal": {
+            "description": "Every matching section, across every document",
+            "title": "Sectiontotal",
+            "type": "integer"
+          },
+          "tooManyMatches": {
+            "default": false,
+            "title": "Toomanymatches",
+            "type": "boolean"
+          },
+          "total": {
+            "description": "Every matching document, not just this page; 0 when there are too many matches",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "queryId",
+          "total",
+          "sectionTotal",
+          "results"
+        ],
+        "title": "DocumentSearchResponse",
+        "type": "object"
+      },
       "DocumentStatus": {
         "enum": [
           "ready_for_publish",
           "published"
         ],
         "title": "DocumentStatus",
+        "type": "string"
+      },
+      "Grouping": {
+        "enum": [
+          "document"
+        ],
+        "title": "Grouping",
         "type": "string"
       },
       "HTTPValidationError": {
@@ -710,6 +818,38 @@
             }
           },
           {
+            "description": "`document` answers word search with a page of documents, each with its best sections; `limit` and `offset` then count documents",
+            "in": "query",
+            "name": "group",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Grouping"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`document` answers word search with a page of documents, each with its best sections; `limit` and `offset` then count documents",
+              "title": "Group"
+            }
+          },
+          {
+            "description": "With `group=document`: how many of each document's sections to give, best first",
+            "in": "query",
+            "name": "sections",
+            "required": false,
+            "schema": {
+              "default": 3,
+              "description": "With `group=document`: how many of each document's sections to give, best first",
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Sections",
+              "type": "integer"
+            }
+          },
+          {
             "in": "query",
             "name": "limit",
             "required": false,
@@ -741,6 +881,9 @@
                   "anyOf": [
                     {
                       "$ref": "#/components/schemas/WordSearchResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DocumentSearchResponse"
                     },
                     {
                       "$ref": "#/components/schemas/TitleSearchResponse"

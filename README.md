@@ -326,7 +326,7 @@ mypy refuses one where another belongs:
 |:--------------------------------| :----------------------------- |
 | `GET: /docs`                    | Automatic API Swagger docs (the same document is committed as `docs/openapi.json`; regenerate with `uv run task openapi`) |
 | `GET: /health`                  | Health check endpoint          |
-| `GET: /v1/search`               | Word search (`q`, optionally inside one document with `tag`, paged by `limit` and `offset`) or title search (`title`); published documents only for now |
+| `GET: /v1/search`               | Word search (`q`, optionally inside one document with `tag`, paged by `limit` and `offset`; `group=document` pages documents instead, each with its best `sections`) or title search (`title`); published documents only for now |
 | `PUT: /documents/{documentId}/versions/{versionId}` | Index a version (202). The body carries exactly one of `contentUrl` (`s3://…/content.md`) or `content` (`markdown`, optional `sectionIds`), plus `status`, `occurredAt`, `versionNumber` and the CMS `metadata`. `status` must be `published` (the index holds one version per document, so anything else is refused with 422), and `metadata.guideTitle` is required: it is the indexed title, never the Markdown's `# ` line. A version older than the one indexed is skipped. `http` mode only. |
 | `DELETE: /documents/{documentId}/versions/{versionId}` | Remove a version at every status (202): from the index if it is the version indexed, and its staged files. `http` mode only. |
 

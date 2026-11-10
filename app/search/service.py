@@ -1,4 +1,5 @@
-"""What `GET /search` calls: word search (`q`, `tag`) and title search (`title`)."""
+"""What `GET /search` calls: word search (`q`, `tag`), by section or by document,
+and title search (`title`)."""
 
 import dataclasses
 import uuid
@@ -26,6 +27,21 @@ class WordSearch:
     tag: uuid.UUID | None = None
     limit: int = 10
     offset: int = 0
+
+
+@dataclasses.dataclass(frozen=True)
+class DocumentSearch:
+    """Word search answered by document: `limit` and `offset` count documents.
+
+    Each document gives at most `sections` of its matching sections.
+    """
+
+    text: str
+    role: routing.Role
+    tag: uuid.UUID | None = None
+    limit: int = 10
+    offset: int = 0
+    sections: int = 3
 
 
 @dataclasses.dataclass(frozen=True)
@@ -57,6 +73,28 @@ class WordResults:
 
 
 @dataclasses.dataclass(frozen=True)
+class DocumentResult:
+    """One document's matching sections, best first.
+
+    `sections` is never empty; its first is the document's best section.
+    `section_total` counts every one of its matching sections.
+    """
+
+    sections: tuple[SectionResult, ...]
+    section_total: int
+
+
+@dataclasses.dataclass(frozen=True)
+class DocumentResults:
+    """`total` counts every matching document, `section_total` their sections."""
+
+    query_id: str
+    total: int
+    section_total: int
+    results: tuple[DocumentResult, ...]
+
+
+@dataclasses.dataclass(frozen=True)
 class TitleResults:
     query_id: str
     results: tuple[chunk_index.TitleHit, ...]
@@ -65,6 +103,13 @@ class TitleResults:
 class SearchService(Protocol):
     async def search_words(self, request: WordSearch) -> WordResults:
         """Raises `TooManyMatchesError` past `MAX_MATCHES`."""
+        ...
+
+    async def search_documents(self, request: DocumentSearch) -> DocumentResults:
+        """Documents ordered by their best section.
+
+        Raises `TooManyMatchesError` past `MAX_MATCHES` sections.
+        """
         ...
 
     async def search_titles(self, request: TitleSearch) -> TitleResults: ...
