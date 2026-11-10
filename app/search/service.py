@@ -13,6 +13,11 @@ MAX_MATCHES = 1000
 class TooManyMatchesError(Exception):
     """More than `MAX_MATCHES` sections match; the caller should narrow the query."""
 
+    def __init__(self, query_id: str, total: int) -> None:
+        super().__init__(f"{total} sections match; at most {MAX_MATCHES} are served")
+        self.query_id = query_id
+        self.total = total
+
 
 @dataclasses.dataclass(frozen=True)
 class WordSearch:
