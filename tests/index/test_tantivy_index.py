@@ -1,4 +1,4 @@
-"""The write half of the Tantivy index: one guide's entries replaced in one commit."""
+"""The write half of the Tantivy index: one document's entries replaced in one commit."""
 
 import dataclasses
 import uuid

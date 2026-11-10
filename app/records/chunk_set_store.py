@@ -27,7 +27,7 @@ class ChunkSetStore(Protocol):
 
 
 class S3ChunkSetStore:
-    """`staged/{strategy}/{documentId}/{versionId}/{status}.jsonl` in the search-index bucket."""
+    """`staged/{strategy}/{documentId}/{versionId}/{status}.jsonl` in the search-store bucket."""
 
     def __init__(self, client: Any, bucket: str) -> None:
         self._client = client

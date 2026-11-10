@@ -1,4 +1,6 @@
 import logging
+import pathlib
+import tempfile
 from typing import Annotated
 
 import pydantic
@@ -119,6 +121,9 @@ class AppConfig(pydantic_settings.BaseSettings):
     mongo_truststore: str = "TRUSTSTORE_CDP_ROOT_CA"
     floci_endpoint_url: str | None = None
     search_store_s3_bucket: str = "rpa-ai-guidance-hub-search-store"
+    search_index_directory: pathlib.Path = (
+        pathlib.Path(tempfile.gettempdir()) / "rpa-ai-guidance-hub-search"
+    )
     aws_region: str = pydantic.Field(
         default="eu-west-2", description="AWS region for Bedrock and other services"
     )

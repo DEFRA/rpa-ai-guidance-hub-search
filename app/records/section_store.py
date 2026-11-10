@@ -33,7 +33,7 @@ class SectionStore(Protocol):
 
 
 class S3SectionStore:
-    """`sections/{documentId}/{versionId}.jsonl` in the search-index bucket."""
+    """`sections/{documentId}/{versionId}.jsonl` in the search-store bucket."""
 
     def __init__(self, client: Any, bucket: str) -> None:
         self._client = client
