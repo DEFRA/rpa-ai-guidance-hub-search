@@ -18,6 +18,7 @@ dependencies = [
     "pydantic-ai-slim[bedrock]==2.63.0",
     "pydantic-settings==2.16.1",
     "pymongo[aws,encryption,snappy,zstd]==4.19.0",
+    "tantivy==0.27.0",
     "urllib3==2.8.0",
     "uvicorn==0.54.0",
     "werkzeug==3.1.9",
