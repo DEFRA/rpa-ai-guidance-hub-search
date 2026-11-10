@@ -12,6 +12,7 @@ os.environ.setdefault("MONGO_TRUSTSTORE", "TRUSTSTORE_CDP_ROOT_CA")
 os.environ.setdefault("ENABLE_METRICS", "false")
 os.environ.setdefault("SOURCE_DOCS_S3_BUCKET", "rpa-ai-guidance-hub-source-docs")
 os.environ.setdefault("MANAGED_DOCS_S3_BUCKET", "rpa-ai-guidance-hub-managed-docs")
+os.environ.setdefault("SEARCH_INDEX_S3_BUCKET", "rpa-ai-guidance-hub-search-index")
 os.environ.setdefault(
     "CLAUDE_SONNET_MODEL_CONFIG",
     "anthropic.claude-sonnet-4-6,arn:aws:bedrock:eu-west-2:123456789012:application-inference-profile/fake-profile-test",

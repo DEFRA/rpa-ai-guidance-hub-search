@@ -28,6 +28,7 @@ from logging import getLogger
 from typing import Any
 
 import boto3
+from botocore import exceptions as botocore_exceptions
 from botocore.config import Config
 
 from app import config as app_config
@@ -36,6 +37,7 @@ logger = getLogger(__name__)
 
 TIMEOUT_SECONDS = 2.5
 ATTEMPTS = 2
+_MISSING = frozenset({"NoSuchKey", "404"})
 
 client: Any = None
 
@@ -65,3 +67,8 @@ def get_s3_client() -> Any:
         )
 
     return client
+
+
+def is_missing(error: botocore_exceptions.ClientError) -> bool:
+    """The object (or bucket) isn't there, as opposed to any other failure."""
+    return error.response.get("Error", {}).get("Code") in _MISSING
