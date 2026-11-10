@@ -11,6 +11,7 @@ from app.common import mongo, tracing
 from app.health import router as health_router
 from app.index import active_index, builds
 from app.ingestion import router as ingestion_router
+from app.search.v1 import router as search_v1_router
 
 logger = getLogger(__name__)
 
@@ -46,6 +47,7 @@ def create_app(
     app = fastapi.FastAPI(lifespan=lifespan, title="RPA Guidance Hub Search API")
     app.add_middleware(tracing.TraceIdMiddleware)
     app.include_router(health_router.router)
+    app.include_router(search_v1_router.router)
 
     if ingestion_mode is app_config.IngestionMode.HTTP:
         app.include_router(ingestion_router.router)

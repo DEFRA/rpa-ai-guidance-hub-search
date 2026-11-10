@@ -257,12 +257,185 @@
         "title": "Operation",
         "type": "string"
       },
+      "SectionResult": {
+        "description": "One section holding the words, at its best-matching chunk.",
+        "properties": {
+          "anchor": {
+            "description": "The section's fragment in the document",
+            "title": "Anchor",
+            "type": "string"
+          },
+          "documentId": {
+            "format": "uuid",
+            "title": "Documentid",
+            "type": "string"
+          },
+          "documentTitle": {
+            "title": "Documenttitle",
+            "type": "string"
+          },
+          "exact": {
+            "description": "False for a near (typo-tolerant) match",
+            "title": "Exact",
+            "type": "boolean"
+          },
+          "heading": {
+            "description": "The section's heading, or the document title before any section",
+            "title": "Heading",
+            "type": "string"
+          },
+          "headingPath": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Headingpath",
+            "type": "array"
+          },
+          "id": {
+            "description": "The section ID",
+            "title": "Id",
+            "type": "string"
+          },
+          "matches": {
+            "title": "Matches",
+            "type": "integer"
+          },
+          "sectionNumber": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sectionnumber"
+          },
+          "snippet": {
+            "items": {
+              "$ref": "#/components/schemas/SnippetPart"
+            },
+            "title": "Snippet",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DocumentStatus"
+          },
+          "url": {
+            "description": "Deep link to the section: the document's URL and its anchor",
+            "title": "Url",
+            "type": "string"
+          },
+          "versionId": {
+            "format": "uuid",
+            "title": "Versionid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "documentId",
+          "documentTitle",
+          "versionId",
+          "status",
+          "sectionNumber",
+          "heading",
+          "headingPath",
+          "anchor",
+          "url",
+          "exact",
+          "matches",
+          "snippet"
+        ],
+        "title": "SectionResult",
+        "type": "object"
+      },
+      "SnippetPart": {
+        "properties": {
+          "match": {
+            "title": "Match",
+            "type": "boolean"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "match"
+        ],
+        "title": "SnippetPart",
+        "type": "object"
+      },
       "SourceType": {
         "enum": [
           "guide"
         ],
         "title": "SourceType",
         "type": "string"
+      },
+      "TitleResult": {
+        "properties": {
+          "documentId": {
+            "format": "uuid",
+            "title": "Documentid",
+            "type": "string"
+          },
+          "documentTitle": {
+            "title": "Documenttitle",
+            "type": "string"
+          },
+          "score": {
+            "description": "0 to 1; closer titles score higher",
+            "title": "Score",
+            "type": "number"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DocumentStatus"
+          },
+          "url": {
+            "description": "Where a reader views the document",
+            "title": "Url",
+            "type": "string"
+          },
+          "versionId": {
+            "format": "uuid",
+            "title": "Versionid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documentId",
+          "documentTitle",
+          "versionId",
+          "status",
+          "url",
+          "score"
+        ],
+        "title": "TitleResult",
+        "type": "object"
+      },
+      "TitleSearchResponse": {
+        "properties": {
+          "queryId": {
+            "title": "Queryid",
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/TitleResult"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "queryId",
+          "results"
+        ],
+        "title": "TitleSearchResponse",
+        "type": "object"
       },
       "ValidationError": {
         "properties": {
@@ -302,6 +475,49 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "WordSearchResponse": {
+        "properties": {
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "queryId": {
+            "title": "Queryid",
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SectionResult"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "tooManyMatches": {
+            "default": false,
+            "title": "Toomanymatches",
+            "type": "boolean"
+          },
+          "total": {
+            "description": "Every matching section, not just this page",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "queryId",
+          "total",
+          "results"
+        ],
+        "title": "WordSearchResponse",
         "type": "object"
       }
     }
@@ -428,6 +644,128 @@
         "summary": "Index Version",
         "tags": [
           "ingestion"
+        ]
+      }
+    },
+    "/v1/search": {
+      "get": {
+        "description": "Give exactly one of `q` (word search) or `title` (title search).",
+        "operationId": "search_v1_search_get",
+        "parameters": [
+          {
+            "description": "Words to find, like Word's Find: any case, anywhere in a word, several words as one phrase",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Words to find, like Word's Find: any case, anywhere in a word, several words as one phrase",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "A title to look up",
+            "in": "query",
+            "name": "title",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A title to look up",
+              "title": "Title"
+            }
+          },
+          {
+            "description": "A document or version ID to search inside",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A document or version ID to search inside",
+              "title": "Tag"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/WordSearchResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TitleSearchResponse"
+                    }
+                  ],
+                  "title": "Response Search V1 Search Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search documents by words, or by title",
+        "tags": [
+          "search"
         ]
       }
     }
