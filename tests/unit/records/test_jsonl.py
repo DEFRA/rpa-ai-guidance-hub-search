@@ -113,6 +113,34 @@ class TestAMalformedSectionFile:
         with pytest.raises(jsonl.MalformedSectionFileError):
             jsonl.loads(text)
 
+    @pytest.mark.parametrize(
+        ("line", "field", "value", "message"),
+        [
+            pytest.param(0, "source", [], "source must be an object", id="source"),
+            pytest.param(0, "title", 5, "title must be a string", id="title"),
+            pytest.param(1, "level", "2", "level must be an integer", id="level"),
+            pytest.param(1, "level", True, "level must be an integer", id="bool-level"),
+            pytest.param(1, "topics", "ab", "topics must be an array", id="topics"),
+            pytest.param(1, "topics", [1], "topics item must be a string", id="item"),
+            pytest.param(1, "blocks", {}, "blocks must be an array", id="blocks"),
+            pytest.param(1, "meta", [], "meta must be an object", id="meta"),
+        ],
+    )
+    def test_refuses_a_field_of_the_wrong_shape(self, line, field, value, message):
+        lines = _lines()
+        lines[line] = {**lines[line], field: value}
+
+        with pytest.raises(jsonl.MalformedSectionFileError, match=message):
+            jsonl.loads(_text(lines))
+
+    def test_refuses_block_lines_that_are_not_an_array(self):
+        lines = _lines()
+        block = {**lines[1]["blocks"][0], "lines": "hello"}
+        lines[1] = {**lines[1], "blocks": [block]}
+
+        with pytest.raises(jsonl.MalformedSectionFileError, match="lines must be"):
+            jsonl.loads(_text(lines))
+
     def test_is_never_written(self):
         out_of_order = [dataclasses.replace(SECTIONS[0], ordinal=5), *SECTIONS[1:]]
 

@@ -44,6 +44,25 @@ class TestGuideMetadata:
         assert source_metadata.GuideMetadata.from_record(stored) == GUIDE
 
 
+class TestAGuideMetadataRecordOfTheWrongShape:
+    @pytest.mark.parametrize(
+        ("field", "value", "message"),
+        [
+            pytest.param("schemes", "ab", "schemes must be an array", id="string"),
+            pytest.param("systems", [1], "systems item must be a string", id="item"),
+            pytest.param("owner", 3, "owner must be a string", id="owner"),
+            pytest.param("scheme_year", "2025", "scheme_year must be", id="year"),
+        ],
+    )
+    def test_is_refused(self, field, value, message):
+        with pytest.raises(TypeError, match=message):
+            source_metadata.GuideMetadata.from_record({field: value})
+
+    def test_is_refused_when_it_is_not_an_object(self):
+        with pytest.raises(TypeError, match="source must be an object"):
+            source_metadata.of("guide", [])
+
+
 class TestOf:
     def test_reads_a_source_types_record(self):
         assert source_metadata.of(models.SourceType.GUIDE, GUIDE.to_record()) == GUIDE

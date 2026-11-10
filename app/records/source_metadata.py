@@ -18,6 +18,8 @@ import dataclasses
 from collections.abc import Mapping
 from typing import Any, ClassVar
 
+from app.records import fields
+
 
 @dataclasses.dataclass(frozen=True)
 class GuideMetadata:
@@ -56,13 +58,19 @@ class GuideMetadata:
     @classmethod
     def from_record(cls, record: Mapping[str, Any]) -> GuideMetadata:
         return cls(
-            version_number=record.get("version_number"),
-            schemes=tuple(record.get("schemes", ())),
-            scheme_year=record.get("scheme_year"),
-            systems=tuple(record.get("systems", ())),
-            audience=tuple(record.get("audience", ())),
-            guidance_types=tuple(record.get("guidance_types", ())),
-            owner=record.get("owner"),
+            version_number=fields.optional_text(
+                record.get("version_number"), "version_number"
+            ),
+            schemes=fields.texts(record.get("schemes", []), "schemes"),
+            scheme_year=fields.optional_integer(
+                record.get("scheme_year"), "scheme_year"
+            ),
+            systems=fields.texts(record.get("systems", []), "systems"),
+            audience=fields.texts(record.get("audience", []), "audience"),
+            guidance_types=fields.texts(
+                record.get("guidance_types", []), "guidance_types"
+            ),
+            owner=fields.optional_text(record.get("owner"), "owner"),
         )
 
 
@@ -80,7 +88,10 @@ def empty(source_type: str) -> SourceMetadata:
 def of(source_type: str, record: Mapping[str, Any] | None) -> SourceMetadata:
     """The stored metadata for `source_type`; no record reads as empty."""
     kind = _type(source_type)
-    return kind.empty() if record is None else kind.from_record(record)
+    if record is None:
+        return kind.empty()
+
+    return kind.from_record(fields.mapping(record, "source"))
 
 
 def _type(source_type: str) -> type[GuideMetadata]:

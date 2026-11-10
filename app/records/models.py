@@ -19,7 +19,7 @@ import uuid
 from collections.abc import Mapping
 from typing import Any
 
-from app.records import ids, source_metadata
+from app.records import fields, ids, source_metadata
 
 type JsonValue = (
     str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
@@ -109,17 +109,23 @@ class DocumentHeader:
     @classmethod
     def from_record(cls, record: Mapping[str, Any]) -> DocumentHeader:
         """A header stored before `source` existed reads with empty metadata."""
-        source_type = SourceType(record["source_type"])
+        source_type = SourceType(fields.text(record["source_type"], "source_type"))
 
         return cls(
-            document_id=ids.DocumentId(uuid.UUID(record["document_id"])),
-            version_id=ids.VersionId(uuid.UUID(record["version_id"])),
-            status=DocumentStatus(record["status"]),
+            document_id=ids.DocumentId(
+                uuid.UUID(fields.text(record["document_id"], "document_id"))
+            ),
+            version_id=ids.VersionId(
+                uuid.UUID(fields.text(record["version_id"], "version_id"))
+            ),
+            status=DocumentStatus(fields.text(record["status"], "status")),
             source_type=source_type,
-            title=record["title"],
-            url=record["url"],
-            content_url=record["content_url"],
-            occurred_at=dt.datetime.fromisoformat(record["occurred_at"]),
+            title=fields.text(record["title"], "title"),
+            url=fields.text(record["url"], "url"),
+            content_url=fields.text(record["content_url"], "content_url"),
+            occurred_at=dt.datetime.fromisoformat(
+                fields.text(record["occurred_at"], "occurred_at")
+            ),
             source=source_metadata.of(source_type, record.get("source")),
         )
 
@@ -150,9 +156,9 @@ class Block:
     @classmethod
     def from_record(cls, record: Mapping[str, Any]) -> Block:
         return cls(
-            kind=BlockKind(record["kind"]),
-            markdown=record["markdown"],
-            lines=tuple(record["lines"]),
+            kind=BlockKind(fields.text(record["kind"], "kind")),
+            markdown=fields.text(record["markdown"], "markdown"),
+            lines=fields.texts(record["lines"], "lines"),
         )
 
 
@@ -180,11 +186,15 @@ class Reference:
         section_id = record.get("section_id")
 
         return cls(
-            kind=ReferenceKind(record["kind"]),
-            text=record["text"],
-            anchor=record.get("anchor"),
-            section_id=ids.SectionId(section_id) if section_id is not None else None,
-            url=record.get("url"),
+            kind=ReferenceKind(fields.text(record["kind"], "kind")),
+            text=fields.text(record["text"], "text"),
+            anchor=fields.optional_text(record.get("anchor"), "anchor"),
+            section_id=(
+                ids.SectionId(fields.text(section_id, "section_id"))
+                if section_id is not None
+                else None
+            ),
+            url=fields.optional_text(record.get("url"), "url"),
         )
 
 
@@ -257,28 +267,39 @@ class SectionRecord:
         parent_section_id = record.get("parent_section_id")
 
         return cls(
-            section_id=ids.SectionId(record["section_id"]),
-            document_id=ids.DocumentId(uuid.UUID(record["document_id"])),
-            version_id=ids.VersionId(uuid.UUID(record["version_id"])),
-            status=DocumentStatus(record["status"]),
-            source_type=SourceType(record["source_type"]),
+            section_id=ids.SectionId(fields.text(record["section_id"], "section_id")),
+            document_id=ids.DocumentId(
+                uuid.UUID(fields.text(record["document_id"], "document_id"))
+            ),
+            version_id=ids.VersionId(
+                uuid.UUID(fields.text(record["version_id"], "version_id"))
+            ),
+            status=DocumentStatus(fields.text(record["status"], "status")),
+            source_type=SourceType(fields.text(record["source_type"], "source_type")),
             parent_section_id=(
-                ids.SectionId(parent_section_id)
+                ids.SectionId(fields.text(parent_section_id, "parent_section_id"))
                 if parent_section_id is not None
                 else None
             ),
-            heading_path=tuple(record["heading_path"]),
-            section_number=record.get("section_number"),
-            anchor=record["anchor"],
-            level=record["level"],
-            ordinal=record["ordinal"],
-            blocks=tuple(Block.from_record(block) for block in record["blocks"]),
+            heading_path=fields.texts(record["heading_path"], "heading_path"),
+            section_number=fields.optional_text(
+                record.get("section_number"), "section_number"
+            ),
+            anchor=fields.text(record["anchor"], "anchor"),
+            level=fields.integer(record["level"], "level"),
+            ordinal=fields.integer(record["ordinal"], "ordinal"),
+            blocks=tuple(
+                Block.from_record(block)
+                for block in fields.mappings(record["blocks"], "blocks")
+            ),
             references=tuple(
                 Reference.from_record(reference)
-                for reference in record.get("references", ())
+                for reference in fields.mappings(
+                    record.get("references", []), "references"
+                )
             ),
-            topics=tuple(record.get("topics", ())),
-            meta=dict(record.get("meta", {})),
+            topics=fields.texts(record.get("topics", []), "topics"),
+            meta=dict(fields.mapping(record.get("meta", {}), "meta")),
         )
 
 
@@ -341,30 +362,36 @@ class ChunkRecord:
         parent_section_id = record.get("parent_section_id")
 
         return cls(
-            chunk_id=ids.ChunkId(record["chunk_id"]),
-            strategy=record["strategy"],
-            document_id=ids.DocumentId(uuid.UUID(record["document_id"])),
-            version_id=ids.VersionId(uuid.UUID(record["version_id"])),
-            status=DocumentStatus(record["status"]),
-            source_type=SourceType(record["source_type"]),
-            section_id=ids.SectionId(record["section_id"]),
+            chunk_id=ids.ChunkId(fields.text(record["chunk_id"], "chunk_id")),
+            strategy=fields.text(record["strategy"], "strategy"),
+            document_id=ids.DocumentId(
+                uuid.UUID(fields.text(record["document_id"], "document_id"))
+            ),
+            version_id=ids.VersionId(
+                uuid.UUID(fields.text(record["version_id"], "version_id"))
+            ),
+            status=DocumentStatus(fields.text(record["status"], "status")),
+            source_type=SourceType(fields.text(record["source_type"], "source_type")),
+            section_id=ids.SectionId(fields.text(record["section_id"], "section_id")),
             parent_section_id=(
-                ids.SectionId(parent_section_id)
+                ids.SectionId(fields.text(parent_section_id, "parent_section_id"))
                 if parent_section_id is not None
                 else None
             ),
-            heading_path=tuple(record["heading_path"]),
-            section_number=record.get("section_number"),
-            anchor=record["anchor"],
-            level=record["level"],
-            ordinal=record["ordinal"],
-            part=record["part"],
-            text=record["text"],
-            plain_text=record["plain_text"],
-            content_hash=record["content_hash"],
-            token_count=record["token_count"],
-            topics=tuple(record.get("topics", ())),
-            meta=dict(record.get("meta", {})),
+            heading_path=fields.texts(record["heading_path"], "heading_path"),
+            section_number=fields.optional_text(
+                record.get("section_number"), "section_number"
+            ),
+            anchor=fields.text(record["anchor"], "anchor"),
+            level=fields.integer(record["level"], "level"),
+            ordinal=fields.integer(record["ordinal"], "ordinal"),
+            part=fields.integer(record["part"], "part"),
+            text=fields.text(record["text"], "text"),
+            plain_text=fields.text(record["plain_text"], "plain_text"),
+            content_hash=fields.text(record["content_hash"], "content_hash"),
+            token_count=fields.integer(record["token_count"], "token_count"),
+            topics=fields.texts(record.get("topics", []), "topics"),
+            meta=dict(fields.mapping(record.get("meta", {}), "meta")),
         )
 
     @classmethod

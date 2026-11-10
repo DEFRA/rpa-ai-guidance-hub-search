@@ -99,6 +99,23 @@ class TestAMalformedChunkSet:
         with pytest.raises(chunk_sets.MalformedChunkSetError):
             chunk_sets.loads(text)
 
+    @pytest.mark.parametrize(
+        ("line", "field", "value", "message"),
+        [
+            pytest.param(0, "source", [], "source must be an object", id="source"),
+            pytest.param(1, "text", 5, "text must be a string", id="text"),
+            pytest.param(1, "part", "0", "part must be an integer", id="part"),
+            pytest.param(1, "topics", "ab", "topics must be an array", id="topics"),
+            pytest.param(1, "meta", [], "meta must be an object", id="meta"),
+        ],
+    )
+    def test_refuses_a_field_of_the_wrong_shape(self, line, field, value, message):
+        lines = _lines()
+        lines[line] = {**lines[line], field: value}
+
+        with pytest.raises(chunk_sets.MalformedChunkSetError, match=message):
+            chunk_sets.loads(_text(lines))
+
     def test_is_never_made(self):
         out_of_order = (dataclasses.replace(CHUNKS[0], ordinal=5), *CHUNKS[1:])
 
