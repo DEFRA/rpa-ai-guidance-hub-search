@@ -4,14 +4,22 @@ It reads only the chunk set the `ApplyJob` names, so it never needs a source,
 the sectioning or a chunking strategy. It refuses chunks made by a strategy
 other than the one the index schema holds (`index_schema.CHUNK_STRATEGY`).
 Wiring lives in `from_config`.
+
+`publish` applies a job to the shared index:
+
+1. download the active build into a temporary directory
+2. apply the staged chunks there
+3. upload the result as a new build and make it active
 """
 
 import logging
 import pathlib
+import tempfile
+from collections.abc import Callable
 
 from app import config as app_config
-from app.common import s3
-from app.index import chunk_index, index_schema, tantivy_index
+from app.common import mongo, s3
+from app.index import builds, chunk_index, index_schema, tantivy_index
 from app.indexing import jobs
 from app.records import chunk_set_store, chunk_sets
 
@@ -78,6 +86,27 @@ def _is_jobs(staged: chunk_sets.ChunkSet, job: jobs.ApplyJob) -> bool:
         job.status,
         job.strategy,
     )
+
+
+async def publish(
+    job: jobs.ApplyJob,
+    index_builds: builds.IndexBuilds,
+    applier_for: Callable[[pathlib.Path], DocumentApplier],
+) -> builds.BuildId:
+    """Applies the job to the active build and publishes the result as active.
+
+    Raises `builds.LostSwapError` if another build became active meanwhile.
+    """
+    with tempfile.TemporaryDirectory(prefix="search-index-") as work:
+        directory = pathlib.Path(work)
+        base = await index_builds.load(directory)
+        await applier_for(directory).apply(job)
+        return await index_builds.publish(directory, base)
+
+
+async def publish_from_config(job: jobs.ApplyJob) -> builds.BuildId:
+    database = await mongo.get_db(await mongo.get_mongo_client())
+    return await publish(job, builds.from_config(database), from_config)
 
 
 def from_config(index_dir: pathlib.Path) -> DocumentApplier:

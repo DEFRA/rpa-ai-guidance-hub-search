@@ -2,6 +2,7 @@
 
 import pytest
 
+from app.common import mongo
 from app.records import models
 from scripts import index_document
 from tests.support import guides
@@ -9,10 +10,8 @@ from tests.support import guides
 URL = guides.job().content_url
 
 
-def _args(tmp_path, status="published"):
+def _args(status="published"):
     return [
-        "--index-dir",
-        str(tmp_path),
         "--source-type",
         "guide",
         "--document-id",
@@ -27,33 +26,37 @@ def _args(tmp_path, status="published"):
 
 
 @pytest.fixture
-def stages(mocker):
-    preparer = mocker.MagicMock()
-    preparer.prepare = mocker.AsyncMock(return_value=mocker.sentinel.apply_job)
-    applier = mocker.MagicMock()
-    applier.apply = mocker.AsyncMock()
-
+def preparer(mocker):
+    built = mocker.MagicMock()
+    built.prepare = mocker.AsyncMock(return_value=mocker.sentinel.apply_job)
     mocker.patch(
         "app.indexing.prepare.document_preparer.from_config",
-        return_value=preparer,
+        return_value=built,
     )
-    applier_from_config = mocker.patch(
-        "app.indexing.apply.document_applier.from_config",
-        return_value=applier,
+    return built
+
+
+@pytest.fixture
+def publish(mocker):
+    return mocker.patch(
+        "app.indexing.apply.document_applier.publish_from_config",
+        mocker.AsyncMock(),
     )
 
-    return preparer, applier, applier_from_config
+
+@pytest.fixture
+def mongo_client(mocker, monkeypatch):
+    client = mocker.MagicMock()
+    client.close = mocker.AsyncMock()
+    monkeypatch.setattr(mongo, "client", client)
+    return client
 
 
 class TestIndexDocument:
+    @pytest.mark.usefixtures("mongo_client")
     @pytest.mark.parametrize("status", list(models.DocumentStatus))
-    def test_prepares_one_job_then_applies_it(self, stages, tmp_path, status, mocker):
-        preparer, applier, applier_from_config = stages
-
-        index_document.main(_args(tmp_path, status.value))
-
-        applier_from_config.assert_called_once_with(tmp_path)
-        applier.apply.assert_awaited_once_with(mocker.sentinel.apply_job)
+    def test_prepares_one_job_then_applies_it(self, preparer, publish, status, mocker):
+        index_document.main(_args(status.value))
 
         (job,), _ = preparer.prepare.await_args
 
@@ -65,8 +68,39 @@ class TestIndexDocument:
         )
         assert job.occurred_at.utcoffset() is not None
         assert job.source_type == models.SourceType.GUIDE
+        publish.assert_awaited_once_with(mocker.sentinel.apply_job)
 
-    @pytest.mark.usefixtures("stages")
+    @pytest.mark.usefixtures("mongo_client")
+    def test_applies_nothing_when_preparing_fails(self, preparer, publish):
+        preparer.prepare.side_effect = RuntimeError("boom")
+
+        with pytest.raises(RuntimeError, match="boom"):
+            index_document.main(_args())
+
+        publish.assert_not_awaited()
+
+    @pytest.mark.usefixtures("preparer")
+    def test_closes_the_mongo_client_even_when_applying_fails(
+        self,
+        publish,
+        mongo_client,
+    ):
+        publish.side_effect = RuntimeError("boom")
+
+        with pytest.raises(RuntimeError, match="boom"):
+            index_document.main(_args())
+
+        mongo_client.close.assert_awaited_once()
+
+    @pytest.mark.usefixtures("preparer")
+    def test_runs_without_a_mongo_client(self, publish, monkeypatch):
+        monkeypatch.setattr(mongo, "client", None)
+
+        index_document.main(_args())
+
+        publish.assert_awaited_once()
+
+    @pytest.mark.usefixtures("preparer", "publish")
     @pytest.mark.parametrize(
         ("flag", "value"),
         [
@@ -75,8 +109,8 @@ class TestIndexDocument:
             pytest.param("--document-id", "not-a-uuid", id="bad-document-id"),
         ],
     )
-    def test_refuses_bad_arguments(self, tmp_path, flag, value):
-        args = _args(tmp_path)
+    def test_refuses_bad_arguments(self, flag, value):
+        args = _args()
         args[args.index(flag) + 1] = value
 
         with pytest.raises(SystemExit):

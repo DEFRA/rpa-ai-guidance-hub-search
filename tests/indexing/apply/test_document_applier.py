@@ -7,10 +7,17 @@ import pytest
 import tantivy
 
 from app import config as app_config
-from app.index import chunk_index, index_schema, tantivy_schema
+from app.index import (
+    builds,
+    chunk_index,
+    index_schema,
+    tantivy_index,
+    tantivy_schema,
+)
 from app.indexing import jobs
 from app.indexing.apply import document_applier
 from app.records import chunk_set_store, chunk_sets, ids, models
+from tests.fakes import builds as fake_builds
 from tests.fakes import chunk_index as fake_chunk_index
 from tests.fakes import chunk_set_store as fake_chunk_set_store
 from tests.support import chunks as fixtures
@@ -122,6 +129,117 @@ class TestApply:
 
         with pytest.raises(document_applier.ChunkSetNotFoundError):
             await applier.apply(job)
+
+
+SECOND_DOCUMENT_ID = ids.DocumentId(uuid.UUID("0199b8a2-0000-7000-8000-00000000f0bb"))
+
+
+@pytest.fixture
+def index_builds():
+    return builds.IndexBuilds(
+        fake_builds.InMemoryBuildStore(),
+        fake_builds.InMemoryActiveBuild(),
+    )
+
+
+@pytest.fixture
+def applier_for(staged):
+    def build(directory):
+        return document_applier.DocumentApplier(
+            staged,
+            tantivy_index.TantivyChunkIndex(directory),
+            STRATEGY,
+        )
+
+    return build
+
+
+def _documents_in(directory):
+    index = tantivy.Index.open(str(directory))
+    tantivy_schema.register_tokenizers(index)
+    searcher = index.searcher()
+    hits = searcher.search(tantivy.Query.all_query(), 100).hits
+    return sorted({searcher.doc(address)["document_id"][0] for _, address in hits})
+
+
+async def _stage(staged, text, document_id=fixtures.DOCUMENT_ID):
+    header, chunks = fixtures.document(
+        [fixtures.Section("1 Overview", 1, (text,))],
+        fixtures.header(document_id=document_id),
+    )
+    chunk_set = chunk_sets.ChunkSet(header, STRATEGY, tuple(chunks))
+    await staged.put(chunk_set)
+    return _job(chunk_set)
+
+
+class TestPublish:
+    async def test_publishes_the_first_build(
+        self,
+        index_builds,
+        applier_for,
+        staged,
+        tmp_path,
+    ):
+        job = await _stage(staged, "Hold a holding number.")
+
+        build_id = await document_applier.publish(job, index_builds, applier_for)
+
+        assert await index_builds.active_build() == build_id
+        assert await index_builds.load(tmp_path / "check") == build_id
+        assert _documents_in(tmp_path / "check") == [str(fixtures.DOCUMENT_ID)]
+
+    async def test_builds_on_the_active_build(
+        self,
+        index_builds,
+        applier_for,
+        staged,
+        tmp_path,
+    ):
+        first_job = await _stage(staged, "Hold a holding number.")
+        second_job = await _stage(staged, "Licences.", SECOND_DOCUMENT_ID)
+        first = await document_applier.publish(first_job, index_builds, applier_for)
+
+        second = await document_applier.publish(second_job, index_builds, applier_for)
+
+        assert second != first
+        await index_builds.load(tmp_path / "check")
+        assert _documents_in(tmp_path / "check") == sorted(
+            [str(fixtures.DOCUMENT_ID), str(SECOND_DOCUMENT_ID)],
+        )
+
+    async def test_publishes_nothing_when_applying_fails(
+        self,
+        index_builds,
+        applier_for,
+    ):
+        with pytest.raises(document_applier.ChunkSetNotFoundError):
+            await document_applier.publish(
+                _job(_staged("Never staged.")),
+                index_builds,
+                applier_for,
+            )
+
+        assert await index_builds.active_build() is None
+
+    async def test_publishes_from_config(self, mocker):
+        database = mocker.sentinel.database
+        mocker.patch("app.common.mongo.get_mongo_client", mocker.AsyncMock())
+        mocker.patch("app.common.mongo.get_db", mocker.AsyncMock(return_value=database))
+        from_config = mocker.patch("app.index.builds.from_config")
+        publish = mocker.patch(
+            "app.indexing.apply.document_applier.publish",
+            mocker.AsyncMock(return_value="build"),
+        )
+        job = _job(_staged("Anything."))
+
+        assert await document_applier.publish_from_config(job) == "build"
+
+        from_config.assert_called_once_with(database)
+        publish.assert_awaited_once_with(
+            job,
+            from_config.return_value,
+            document_applier.from_config,
+        )
 
 
 class TestFromConfig:
