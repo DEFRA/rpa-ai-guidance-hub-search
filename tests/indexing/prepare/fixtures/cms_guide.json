@@ -1,0 +1,38 @@
+{
+  "id": "0199b8a2-0000-7000-8000-00000000f001",
+  "metadata": {
+    "guideTitle": "Field Visit Guidance",
+    "schemes": ["Sustainable Farming Incentive"],
+    "schemeYear": 2026,
+    "owner": "Schemes team",
+    "goal": "Help inspectors plan a visit.",
+    "requirements": "Know the scheme rules.",
+    "systems": ["Rural Payments service"],
+    "audience": ["Inspectors"],
+    "guidanceType": "Process guide"
+  },
+  "source": {
+    "uploadId": "upload-1",
+    "fileId": "file-1",
+    "filename": "field-visit.docx"
+  },
+  "createdAt": "2026-11-01T10:00:00Z",
+  "versions": [
+    {
+      "id": "0199b8a2-0000-7000-8000-00000000f002",
+      "contentUrl": "s3://managed-docs/0199b8a2-0000-7000-8000-00000000f001/0199b8a2-0000-7000-8000-00000000f002/content.md",
+      "title": "Field Visit Guidance",
+      "versionNumber": "1.0",
+      "createdBy": {"id": "user-1", "displayName": "A Author"},
+      "createdAt": "2026-11-01T10:00:00Z"
+    },
+    {
+      "id": "0199b8a2-0000-7000-8000-00000000f003",
+      "contentUrl": "s3://managed-docs/0199b8a2-0000-7000-8000-00000000f001/0199b8a2-0000-7000-8000-00000000f003/content.md",
+      "title": "Field Visit Guidance",
+      "versionNumber": "1.1",
+      "createdBy": null,
+      "createdAt": "2026-11-05T10:00:00Z"
+    }
+  ]
+}
