@@ -1,4 +1,5 @@
-"""Contract for every `ChunkIndex`. Subclass it and override `chunk_index`.
+"""Contract for every `ChunkIndex`. Subclass it beside a module-level
+`chunk_index` fixture that returns an empty index.
 
 Asserts relative order only; scores differ between engines.
 """
@@ -17,8 +18,11 @@ Section = fixtures.Section
 PUBLISHED = frozenset({models.DocumentStatus.PUBLISHED})
 EVERY_STATUS = frozenset(models.DocumentStatus)
 
+_HOLDING = "Hold a holding number on the boundaries."
+
 OTHER_DOCUMENT_ID = ids.DocumentId(uuid.UUID("0199b8a2-0000-7000-8000-0000000000aa"))
 OTHER_VERSION_ID = ids.VersionId(uuid.UUID("0199b8a2-0000-7000-8000-0000000000ab"))
+BOTH = {fixtures.DOCUMENT_ID, OTHER_DOCUMENT_ID}
 NEXT_VERSION_ID = ids.VersionId(uuid.UUID("0199b8a2-0000-7000-8000-0000000000ac"))
 
 CLAIMS = fixtures.document(
@@ -63,11 +67,14 @@ async def _found(
     return [hit.heading_path for hit in (await index.search(query)).hits]
 
 
-class ChunkIndexContract:
-    @pytest.fixture
-    def chunk_index(self) -> chunk_index_module.ChunkIndex:
-        raise NotImplementedError
+async def _titled(
+    index: chunk_index_module.ChunkIndex,
+    query: chunk_index_module.TitleQuery,
+) -> set[ids.DocumentId]:
+    return {hit.document_id for hit in await index.search_titles(query)}
 
+
+class ChunkIndexContract:
     async def test_finds_a_replaced_document(self, chunk_index):
         await chunk_index.replace_document(*CLAIMS)
 
@@ -246,6 +253,77 @@ class ChunkIndexContract:
         assert bool(await _found(chunk_index, _query(text))) is found
 
     @pytest.mark.parametrize(
+        ("text", "found"),
+        [
+            pytest.param("4.2.1", [("Eligibility",)], id="number"),
+            pytest.param(" 4.2.1 ", [("Eligibility",)], id="spaced"),
+            pytest.param("4.2.10", [("Woodland",)], id="longer-number"),
+            pytest.param("4.2", [], id="parent-number"),
+        ],
+    )
+    async def test_finds_a_section_by_its_number(self, chunk_index, text, found):
+        await chunk_index.replace_document(
+            *fixtures.document(
+                [
+                    Section("4.2.1 Eligibility", 1, ("Hold a holding number.",)),
+                    Section("4.2.10 Woodland", 1, ("Woodland grants.",)),
+                ],
+            ),
+        )
+
+        assert await _found(chunk_index, _query(text)) == found
+
+    @pytest.mark.parametrize(
+        ("text", "exact"),
+        [
+            pytest.param("holding", [True], id="exact"),
+            pytest.param("holdng", [False], id="one-typo"),
+            pytest.param("bundaires", [False], id="two-typos-in-a-long-word"),
+            pytest.param("bundairs", [], id="three-typos"),
+            pytest.param("hldng", [], id="over-the-budget"),
+            pytest.param("hold a holdng", [False], id="phrase-with-a-typo"),
+            pytest.param("a hold holdng", [], id="near-words-out-of-order"),
+            pytest.param("numbr", [False], id="body-word"),
+            pytest.param("nmber", [False], id="missing-letter"),
+            pytest.param("bed", [], id="short-word-has-no-budget"),
+        ],
+    )
+    async def test_finds_a_near_match_within_the_typo_budget(
+        self,
+        chunk_index,
+        text,
+        exact,
+    ):
+        await chunk_index.replace_document(
+            *fixtures.document(
+                [Section("4.2.1 Eligibility", 1, (_HOLDING,))],
+            ),
+        )
+
+        hits = (await chunk_index.search(_query(text))).hits
+
+        assert [(hit.heading_path, hit.exact) for hit in hits] == [
+            (("Eligibility",), flag) for flag in exact
+        ]
+
+    async def test_ranks_every_exact_match_above_any_near_match(self, chunk_index):
+        await chunk_index.replace_document(
+            *fixtures.document(
+                [
+                    Section("1 Boundry rules", 1, ("Boundry, boundry, boundry.",)),
+                    Section("2 Overview", 1, ("A boundary.",)),
+                ],
+            ),
+        )
+
+        hits = (await chunk_index.search(_query("boundary"))).hits
+
+        assert [(hit.heading_path, hit.exact) for hit in hits] == [
+            (("Overview",), True),
+            (("Boundry rules",), False),
+        ]
+
+    @pytest.mark.parametrize(
         "text",
         [
             pytest.param("", id="empty"),
@@ -301,13 +379,56 @@ class ChunkIndexContract:
             models.DocumentStatus.READY_FOR_PUBLISH,
         )
 
-    async def test_finds_no_title_for_something_unlike_any(self, chunk_index):
+    @pytest.mark.parametrize(
+        ("text", "found"),
+        [
+            pytest.param("Cla", {fixtures.DOCUMENT_ID}, id="start-of-a-word"),
+            pytest.param("Guida", BOTH, id="shared"),
+            pytest.param("guida cla", {fixtures.DOCUMENT_ID}, id="reordered-starts"),
+            pytest.param("Gudia", BOTH, id="typo"),
+            pytest.param("Woo cla", set(), id="starts-of-two-titles"),
+        ],
+    )
+    async def test_finds_a_title_from_half_words(self, chunk_index, text, found):
+        await chunk_index.replace_document(*CLAIMS)
+        await chunk_index.replace_document(*DRAFT)
+
+        assert await _titled(chunk_index, _titles(text)) == found
+
+    async def test_ranks_a_whole_title_word_above_its_start(self, chunk_index):
+        await chunk_index.replace_document(*CLAIMS)
+        await chunk_index.replace_document(
+            *fixtures.document(
+                [Section("1 Overview", 1)],
+                fixtures.header(
+                    document_id=OTHER_DOCUMENT_ID,
+                    version_id=OTHER_VERSION_ID,
+                    title="Claim Forms",
+                ),
+            ),
+        )
+
+        hits = await chunk_index.search_titles(_titles("claim"))
+
+        assert [hit.title for hit in hits] == ["Claim Forms", "Claims Guidance"]
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            pytest.param("zzzz qqqq", id="nonsense"),
+            pytest.param("Hedge", id="start-of-no-title-word"),
+            pytest.param("ms", id="short-inside-a-word"),
+            pytest.param("aims", id="end-of-a-word"),
+        ],
+    )
+    async def test_finds_no_title_for_something_unlike_any(self, chunk_index, text):
         await chunk_index.replace_document(*CLAIMS)
 
-        assert await chunk_index.search_titles(_titles("zzzz qqqq")) == []
+        assert await chunk_index.search_titles(_titles(text)) == []
 
     async def test_returns_at_most_the_title_limit(self, chunk_index):
         await chunk_index.replace_document(*CLAIMS)
         await chunk_index.replace_document(*DRAFT)
 
-        assert len(await chunk_index.search_titles(_titles("Guidance", limit=1))) <= 1
+        assert await _titled(chunk_index, _titles("Guidance")) == BOTH
+        assert len(await chunk_index.search_titles(_titles("Guidance", limit=1))) == 1

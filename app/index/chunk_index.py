@@ -8,6 +8,16 @@ from typing import Protocol
 from app.records import ids, models
 
 MAX_LIMIT = 1000
+_ONE_TYPO_FROM = 4
+_TWO_TYPOS_FROM = 8
+
+
+def typo_budget(word: str) -> int:
+    """Edits (insert, delete, substitute, swap neighbours) a near match allows."""
+    if len(word) >= _TWO_TYPOS_FROM:
+        return 2
+
+    return 1 if len(word) >= _ONE_TYPO_FROM else 0
 
 
 def _check_page(limit: int, offset: int = 0) -> None:
@@ -24,11 +34,12 @@ def _check_page(limit: int, offset: int = 0) -> None:
 class ChunkQuery:
     """Plain user text, never engine syntax; must not raise on any input.
 
-    A section matches when `word_match.find` matches its headings or body, or
-    nearly: within a typo budget per word, ranked below every exact match.
-    `statuses` is the caller's role already resolved. `tag` is a document or
-    version ID to search inside. A section number such as `4.2.1` should also
-    match `section_number`.
+    A section matches exactly when `word_match.find` matches its headings or
+    body, or the whole query is its `section_number` (`4.2.1`, not `4.2.10`).
+    It matches nearly when each query word, in order and in one block, is a
+    whole word within `typo_budget` of it. Every exact match ranks above every
+    near one. `statuses` is the caller's role already resolved. `tag` is a
+    document or version ID to search inside.
     """
 
     text: str
@@ -74,7 +85,11 @@ class SectionHits:
 
 @dataclasses.dataclass(frozen=True)
 class TitleQuery:
-    """Forgives typos, half words and words in another order."""
+    """Forgives typos, half words and words in another order.
+
+    A title matches when every query word matches one of its words: whole, as
+    its start (3 or more characters), or within `typo_budget` of either.
+    """
 
     text: str
     statuses: frozenset[models.DocumentStatus]

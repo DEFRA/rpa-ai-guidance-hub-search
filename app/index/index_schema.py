@@ -117,7 +117,7 @@ def to_index_document(
     chunk: models.ChunkRecord,
 ) -> dict[str, IndexValue]:
     """The one mapping from a chunk to index fields. `None` means no value."""
-    if chunk.document_id != header.document_id or chunk.version_id != header.version_id:
+    if _owner(chunk) != _owner(header):
         msg = f"chunk {chunk.chunk_id} does not belong to the header's version"
         raise ValueError(msg)
 
@@ -157,3 +157,10 @@ def _document_fields(
         URL: header.url,
         TITLE: header.title,
     }
+
+
+def _owner(
+    record: models.DocumentHeader | models.ChunkRecord,
+) -> tuple[object, ...]:
+    """What a chunk shares with its header: version, status and source."""
+    return (record.document_id, record.version_id, record.status, record.source_type)

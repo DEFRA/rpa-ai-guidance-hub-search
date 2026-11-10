@@ -77,8 +77,10 @@ class TestADocumentHeaderAsStored:
         class PageMetadata:
             SOURCE_TYPE: ClassVar[str] = "govuk_page"
 
+        page_metadata = PageMetadata()
+
         with pytest.raises(ValueError, match="'guide' documents"):
-            dataclasses.replace(HEADER, source=PageMetadata())
+            dataclasses.replace(HEADER, source=page_metadata)
 
     def test_ignores_fields_it_does_not_know(self):
         stored = {**HEADER.to_record(), "summary": "Not a field."}
@@ -86,8 +88,10 @@ class TestADocumentHeaderAsStored:
         assert models.DocumentHeader.from_record(stored) == HEADER
 
     def test_refuses_a_timestamp_without_a_timezone(self):
+        naive = dt.datetime(2026, 11, 3)  # noqa: DTZ001
+
         with pytest.raises(ValueError, match="timezone"):
-            dataclasses.replace(HEADER, occurred_at=dt.datetime(2026, 11, 3))  # noqa: DTZ001
+            dataclasses.replace(HEADER, occurred_at=naive)
 
 
 class TestADocumentHeadersLinks:

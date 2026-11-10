@@ -1,13 +1,15 @@
-"""In-memory `ChunkIndex`: `word_match.find` for words, difflib for titles."""
+"""In-memory `ChunkIndex`: `word_match.find` plus edit distance for near matches."""
 
-import difflib
+import re
 from collections.abc import Sequence
 
 from app.index import chunk_index, index_schema
 from app.matching import word_match
 from app.records import ids, models
 
-_TITLE_CUTOFF = 0.6
+_WORD = re.compile(r"\w+")
+_SHORT = 2
+_WHOLE, _START, _TYPO = 1.0, 0.75, 0.5
 
 
 class InMemoryChunkIndex:
@@ -34,7 +36,6 @@ class InMemoryChunkIndex:
         self._documents.pop(document_id, None)
 
     async def search(self, query: chunk_index.ChunkQuery) -> chunk_index.SectionHits:
-        weights = index_schema.weights()
         best: dict[ids.SectionId, chunk_index.SectionHit] = {}
 
         for header, chunks in self._visible(query.statuses):
@@ -45,18 +46,13 @@ class InMemoryChunkIndex:
                 continue
 
             for chunk in chunks:
-                headings = "\n".join(chunk.heading_path)
-                score = weights[index_schema.HEADING_PATH] * len(
-                    word_match.find(query.text, headings),
-                ) + weights[index_schema.BODY] * len(
-                    word_match.find(query.text, chunk.plain_text),
-                )
+                hit = _match(query.text, header, chunk)
                 kept = best.get(chunk.section_id)
 
-                if score and (kept is None or score > kept.score):
-                    best[chunk.section_id] = _hit(header, chunk, score)
+                if hit and (kept is None or _rank(hit) > _rank(kept)):
+                    best[chunk.section_id] = hit
 
-        ranked = sorted(best.values(), key=lambda hit: hit.score, reverse=True)
+        ranked = sorted(best.values(), key=_rank, reverse=True)
         page = ranked[query.offset : query.offset + query.limit]
         return chunk_index.SectionHits(hits=tuple(page), total=len(ranked))
 
@@ -71,11 +67,11 @@ class InMemoryChunkIndex:
                 title=header.title,
                 status=header.status,
                 url=header.url,
-                score=_closeness(query.text, header.title),
+                score=score,
             )
             for header, _ in self._visible(query.statuses)
+            if (score := _title_score(query.text, header.title))
         ]
-        hits = [hit for hit in hits if hit.score >= _TITLE_CUTOFF]
         hits.sort(key=lambda hit: hit.score, reverse=True)
         return hits[: query.limit]
 
@@ -88,23 +84,119 @@ class InMemoryChunkIndex:
         ]
 
 
-def _closeness(text: str, title: str) -> float:
-    def ratio(left: str, right: str) -> float:
-        return difflib.SequenceMatcher(None, left, right).ratio()
+def _rank(hit: chunk_index.SectionHit) -> tuple[bool, float]:
+    return hit.exact, hit.score
 
-    def sort_words(value: str) -> str:
-        return " ".join(sorted(value.casefold().split()))
 
-    return max(
-        ratio(text.casefold(), title.casefold()),
-        ratio(sort_words(text), sort_words(title)),
+def _match(
+    text: str,
+    header: models.DocumentHeader,
+    chunk: models.ChunkRecord,
+) -> chunk_index.SectionHit | None:
+    weights = index_schema.weights()
+    heading_weight = weights[index_schema.HEADING_PATH]
+    body_weight = weights[index_schema.BODY]
+    headings = "\n".join(chunk.heading_path)
+    number = heading_weight if text.strip() == chunk.section_number else 0
+    exact = (
+        number
+        + heading_weight * len(word_match.find(text, headings))
+        + body_weight * len(word_match.find(text, chunk.plain_text))
     )
+
+    if exact:
+        return _hit(header, chunk, exact, exact=True)
+
+    near = heading_weight * _near_matches(text, headings) + body_weight * (
+        _near_matches(text, chunk.plain_text)
+    )
+    return _hit(header, chunk, near, exact=False) if near else None
+
+
+def _near_matches(query: str, text: str) -> int:
+    """Runs of whole words in one block, each within the query word's budget."""
+    words = [word.casefold() for word in _WORD.findall(query)]
+
+    if not words:
+        return 0
+
+    count = 0
+
+    for block in text.split("\n"):
+        candidates = [word.casefold() for word in _WORD.findall(block)]
+
+        for start in range(len(candidates) - len(words) + 1):
+            run = candidates[start : start + len(words)]
+            count += all(
+                _distance(word, candidate) <= chunk_index.typo_budget(word)
+                for word, candidate in zip(words, run, strict=True)
+            )
+
+    return count
+
+
+def _title_score(query: str, title: str) -> float:
+    """The mean of each query word's best match; 0 unless every word matches."""
+    words = [word.casefold() for word in _WORD.findall(query)]
+    title_words = [word.casefold() for word in _WORD.findall(title)]
+
+    if not words:
+        return 0
+
+    scores = [
+        max(
+            (_title_word_score(word, title_word) for title_word in title_words),
+            default=0,
+        )
+        for word in words
+    ]
+    return sum(scores) / len(scores) if all(scores) else 0
+
+
+def _title_word_score(word: str, candidate: str) -> float:
+    if word == candidate:
+        return _WHOLE
+
+    if len(word) <= _SHORT:
+        return 0
+
+    if candidate.startswith(word):
+        return _START
+
+    budget = chunk_index.typo_budget(word)
+    near = min(_distance(word, candidate), _distance(word, candidate[: len(word)]))
+    return _TYPO if near <= budget else 0
+
+
+def _distance(left: str, right: str) -> int:
+    """Edits between two words, counting a swap of neighbours as one."""
+    previous: list[int] = []
+    row = list(range(len(right) + 1))
+
+    for i, left_char in enumerate(left, start=1):
+        before, previous, row = previous, row, [i]
+
+        for j, right_char in enumerate(right, start=1):
+            cost = int(left_char != right_char)
+            row.append(min(previous[j] + 1, row[j - 1] + 1, previous[j - 1] + cost))
+
+            if (
+                i > 1
+                and j > 1
+                and left_char == right[j - 2]
+                and left[i - 2] == right_char
+            ):
+                row[j] = min(row[j], before[j - 2] + 1)
+
+    return row[-1]
 
 
 def _hit(
     header: models.DocumentHeader,
     chunk: models.ChunkRecord,
     score: float,
+    *,
+    exact: bool,
 ) -> chunk_index.SectionHit:
     return chunk_index.SectionHit(
         section_id=chunk.section_id,
@@ -119,4 +211,5 @@ def _hit(
         url=header.url,
         plain_text=chunk.plain_text,
         score=score,
+        exact=exact,
     )

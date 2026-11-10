@@ -6,7 +6,7 @@ import hashlib
 import pytest
 
 from app.index import index_schema
-from app.records import ids
+from app.records import ids, models
 from tests.support import chunks as fixtures
 
 HEADER, CHUNKS = fixtures.document([fixtures.Section("4.2.1 Concurrent claims", 3)])
@@ -106,6 +106,16 @@ class TestAChunkAsAnIndexDocument:
 
         with pytest.raises(ValueError, match="does not belong"):
             index_schema.to_index_document(other, CHUNKS[0])
+
+    def test_refuses_a_chunk_with_another_status(self):
+        published = fixtures.header(status=models.DocumentStatus.PUBLISHED)
+        draft = dataclasses.replace(
+            CHUNKS[0],
+            status=models.DocumentStatus.READY_FOR_PUBLISH,
+        )
+
+        with pytest.raises(ValueError, match="does not belong"):
+            index_schema.to_index_document(published, draft)
 
 
 class TestADocumentAsATitleEntry:
