@@ -79,10 +79,14 @@ def dump_lines(lines: Sequence[dict[str, Any]]) -> str:
 
 
 def parse_lines(text: str, error: type[ValueError]) -> list[dict[str, Any]]:
-    """Every non-blank line as a JSON object; `error` names the bad line."""
+    """Every non-blank line as a JSON object; `error` names the bad line.
+
+    Splits on `\\n` only: `str.splitlines()` would also break at U+2028 and
+    friends, which JSON allows unescaped inside strings.
+    """
     return [
         _parse(number, line, error)
-        for number, line in enumerate(text.splitlines(), start=1)
+        for number, line in enumerate(text.split("\n"), start=1)
         if line.strip()
     ]
 

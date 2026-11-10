@@ -45,6 +45,8 @@ class TestSplittingASectionNumber:
                 ("3", "2026 changes"),
                 id="only-the-first-token",
             ),
+            pytest.param("1\tClaims", ("1", "Claims"), id="tab-separator"),
+            pytest.param("1\u00a0Claims", ("1", "Claims"), id="non-breaking-space"),
             pytest.param("1", (None, "1"), id="number-without-text"),
             pytest.param("A Guide", (None, "A Guide"), id="leading-capital-word"),
         ],

@@ -42,6 +42,16 @@ class TestASectionFile:
     def test_keeps_non_ascii_text_readable(self):
         assert "Éligibilité" in jsonl.dumps(HEADER, SECTIONS)
 
+    @pytest.mark.parametrize(
+        "separator", ["\u0085", "\u2028", "\u2029", "\x0b", "\x0c"]
+    )
+    def test_keeps_unicode_line_separators_in_text(self, separator):
+        header, sections = fixtures.sections(
+            [fixtures.Section(f"1 A{separator}B", 1, (f"x{separator}y",))],
+        )
+
+        assert jsonl.loads(jsonl.dumps(header, sections)) == (header, tuple(sections))
+
     def test_may_hold_no_sections(self):
         assert jsonl.loads(jsonl.dumps(HEADER, [])) == (HEADER, ())
 
