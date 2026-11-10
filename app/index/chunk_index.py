@@ -5,19 +5,15 @@ import uuid
 from collections.abc import Sequence
 from typing import Protocol
 
+from app.matching import word_match
 from app.records import ids, models
 
 MAX_LIMIT = 1000
-_ONE_TYPO_FROM = 4
-_TWO_TYPOS_FROM = 8
 
 
 def typo_budget(word: str) -> int:
     """Edits (insert, delete, substitute, swap neighbours) a near match allows."""
-    if len(word) >= _TWO_TYPOS_FROM:
-        return 2
-
-    return 1 if len(word) >= _ONE_TYPO_FROM else 0
+    return word_match.typo_budget(word)
 
 
 def _check_page(limit: int, offset: int = 0) -> None:
