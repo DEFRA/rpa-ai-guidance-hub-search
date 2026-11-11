@@ -33,7 +33,10 @@ jobs:
       - name: Check openapi.json is up to date
         run: uv run task openapi-check
 
+      # Dependabot-triggered runs cannot read Actions secrets (only Dependabot
+      # secrets), so SONAR_TOKEN is empty and the scan would fail.
       - name: SonarCloud Scan
+        if: ${{ github.actor != 'dependabot[bot]' }}
         uses: SonarSource/sonarqube-scan-action@4d1dc0c91ee400dcf8a6dddf2f705ac36542e304 # 8.4.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
