@@ -31,9 +31,13 @@ ChunkId = NewType("ChunkId", str)
 _SECTION_TAG = "section/v1"
 _CHUNK_TAG = "chunk/v1"
 
-# "4.2.1 Text" or "A.1 Text"; "Annex A" is author text, not a number.
+# "4.2.1 Text" or "A.1 Text"; "Annex A" is author text, not a number. Any
+# whitespace may separate them (tab, non-breaking space), so renumbering never
+# leaks the number into the heading that gets hashed. The text starts at a
+# non-space so the whitespace run and the text can't overlap, which keeps
+# matching linear however the input is split.
 _NUMBERED_HEADING = re.compile(
-    r"(?P<number>\d+(?:\.\d+)*|[A-Z]+(?:\.\d+)+) (?P<text>.+)"
+    r"(?P<number>\d+(?:\.\d+)*|[A-Z]+(?:\.\d+)+)\s+(?P<text>\S.*)"
 )
 
 

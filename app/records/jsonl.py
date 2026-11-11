@@ -79,10 +79,14 @@ def dump_lines(lines: Sequence[dict[str, Any]]) -> str:
 
 
 def parse_lines(text: str, error: type[ValueError]) -> list[dict[str, Any]]:
-    """Every non-blank line as a JSON object; `error` names the bad line."""
+    """Every non-blank line as a JSON object; `error` names the bad line.
+
+    Splits on `\\n` only: `str.splitlines()` would also break at U+2028 and
+    friends, which JSON allows unescaped inside strings.
+    """
     return [
         _parse(number, line, error)
-        for number, line in enumerate(text.splitlines(), start=1)
+        for number, line in enumerate(text.split("\n"), start=1)
         if line.strip()
     ]
 
@@ -106,17 +110,7 @@ def _check(
     sections: Sequence[models.SectionRecord],
 ) -> None:
     for position, section in enumerate(sections):
-        if (
-            section.document_id,
-            section.version_id,
-            section.status,
-            section.source_type,
-        ) != (
-            header.document_id,
-            header.version_id,
-            header.status,
-            header.source_type,
-        ):
+        if not _belongs_to(section, header):
             msg = (
                 f"section {section.section_id} does not belong to the header's version"
             )
@@ -125,3 +119,13 @@ def _check(
         if section.ordinal != position:
             msg = f"expected ordinal {position}, got {section.ordinal}"
             raise MalformedSectionFileError(msg)
+
+
+def _belongs_to(section: models.SectionRecord, header: models.DocumentHeader) -> bool:
+    """Whether the section carries the same version identity as the header."""
+    return (
+        section.document_id == header.document_id
+        and section.version_id == header.version_id
+        and section.status == header.status
+        and section.source_type == header.source_type
+    )
