@@ -99,10 +99,9 @@ def _starts_new_block(
             return line_kind is not models.BlockKind.PARAGRAPH
         case models.BlockKind.BLOCKQUOTE:
             return line_kind is not models.BlockKind.BLOCKQUOTE
-        case models.BlockKind.LIST:
-            return line_kind is models.BlockKind.BLOCKQUOTE and not line[:1].isspace()
         case _:
-            return True
+            # A list. Tables are found before this, so never reach here.
+            return line_kind is models.BlockKind.BLOCKQUOTE and not line[:1].isspace()
 
 
 def _list_continues(lines: Sequence[str], blank: int, first: str) -> bool:

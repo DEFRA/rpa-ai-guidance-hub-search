@@ -49,6 +49,12 @@ class TestParse:
             (Kind.PARAGRAPH, ("Line one\\ line two",)),
         ]
 
+    def test_an_unindented_quote_ends_a_list(self, chef):
+        assert _kinds("- item\n> quote", chef) == [
+            (Kind.LIST, ("item",)),
+            (Kind.BLOCKQUOTE, ("quote",)),
+        ]
+
     def test_a_blockquote_is_one_block_with_a_line_per_paragraph(self, chef):
         body = "> Dear [name]\n>\n> We will visit.\n>\n> - gates\n> - stock"
 
@@ -70,6 +76,11 @@ class TestParse:
             (Kind.PARAGRAPH, ("Before.",)),
             (Kind.TABLE, ("Item | Notes", "Map | Print it", "A | B | 5 & 6")),
             (Kind.PARAGRAPH, ("After.",)),
+        ]
+
+    def test_a_pipe_in_prose_is_not_a_table(self, chef):
+        assert _kinds("Cost | per hectare\n|---|---|\n| 1 | 2 |", chef) == [
+            (Kind.PARAGRAPH, ("Cost | per hectare |---|---| | 1 | 2 |",)),
         ]
 
     def test_keeps_each_blocks_raw_markdown(self, chef):

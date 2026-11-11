@@ -99,6 +99,7 @@ class TestNormaliseUrl:
             pytest.param("mailto:Team@A.com", "mailto:Team@A.com", id="no-host"),
             pytest.param("https://a.com:x/", "https://a.com:x/", id="bad-port"),
             pytest.param("file:///a b.pdf", "file:///a b.pdf", id="file"),
+            pytest.param("HTTP://[::1]:80/p", "http://[::1]/p", id="ipv6-host"),
         ],
     )
     def test_normalises(self, url, normalised):

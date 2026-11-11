@@ -53,3 +53,12 @@ class TestPackedChunking:
         chunks = packed_chunking.PackedChunking().chunk([section])
 
         assert [chunk.plain_text for chunk in chunks] == ["Hi.", "A", "Bye."]
+
+    def test_keeps_a_leading_table_alone(self):
+        table = models.Block(models.BlockKind.TABLE, "| A |", ("A",))
+        (section,) = _sections("Bye.")
+        section = dataclasses.replace(section, blocks=(table, *section.blocks))
+
+        chunks = packed_chunking.PackedChunking().chunk([section])
+
+        assert [chunk.plain_text for chunk in chunks] == ["A", "Bye."]
