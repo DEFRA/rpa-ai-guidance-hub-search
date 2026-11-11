@@ -8,6 +8,7 @@ import tantivy
 
 from app.index import index_schema, tantivy_index, tantivy_schema
 from app.records import ids
+from tests.support import chunk_index_contract
 from tests.support import chunks as fixtures
 
 Section = fixtures.Section
@@ -319,6 +320,12 @@ class TestIndexedVersion:
         assert await chunk_index.indexed_version(OTHER_DOCUMENT_ID) is None
 
 
+class TestTantivyChunkIndexContract(chunk_index_contract.ChunkIndexContract):
+    @pytest.fixture
+    def chunk_index(self, tmp_path):
+        return tantivy_index.TantivyChunkIndex(tmp_path / "contract")
+
+
 class TestOpeningTheIndex:
     async def test_reopens_what_an_earlier_instance_wrote(self, directory):
         await tantivy_index.TantivyChunkIndex(directory).replace_document(*CLAIMS)
@@ -328,9 +335,10 @@ class TestOpeningTheIndex:
 
         assert len(_entries(directory)) == 4
 
-    async def test_search_is_not_built_yet(self, chunk_index):
-        with pytest.raises(NotImplementedError):
-            await chunk_index.search(None)
+    async def test_refuses_an_index_built_with_other_fields(self, directory):
+        await tantivy_index.TantivyChunkIndex(directory).replace_document(*CLAIMS)
+        meta = directory / "meta.json"
+        meta.write_text(meta.read_text().replace('"heading_ngram"', '"old_field"'))
 
-        with pytest.raises(NotImplementedError):
-            await chunk_index.search_titles(None)
+        with pytest.raises(tantivy_index.IncompatibleIndexError, match="rebuild"):
+            tantivy_index.TantivyChunkIndex(directory)

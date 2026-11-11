@@ -97,6 +97,7 @@ class ChunkIndexContract:
             hit.heading_path,
             hit.section_number,
             hit.anchor,
+            hit.url,
             hit.plain_text,
             hit.exact,
         ) == (
@@ -109,6 +110,7 @@ class ChunkIndexContract:
             ("Eligibility", "Hedgerows"),
             "2.1",
             "21-hedgerows",
+            header.url,
             "Payments for maintaining boundaries.",
             True,
         )
@@ -305,6 +307,57 @@ class ChunkIndexContract:
 
         assert bool(await _found(chunk_index, _query(text))) is found
 
+    async def test_counts_the_matches_in_a_hit(self, chunk_index):
+        await chunk_index.replace_document(
+            *fixtures.document(
+                [Section("1 Hedgerows", 1, ("A hedgerow and a hedgerow.",))]
+            ),
+        )
+
+        (hit,) = (await chunk_index.search(_query("hedgerow"))).hits
+
+        assert hit.matches == 3
+
+    async def test_finds_a_near_match_for_a_typo(self, chunk_index):
+        await chunk_index.replace_document(*CLAIMS)
+
+        (hit,) = (await chunk_index.search(_query("livestok"))).hits
+
+        assert (hit.heading_path, hit.exact) == (("Overview",), False)
+
+    async def test_ranks_every_near_match_below_every_exact_match(self, chunk_index):
+        await chunk_index.replace_document(
+            *fixtures.document(
+                [
+                    Section("1 Overview", 1, ("A hedgerw, a hedgerw, a hedgerw.",)),
+                    Section("2 Boundaries", 1, ("One hedgerow.",)),
+                ],
+            ),
+        )
+
+        hits = (await chunk_index.search(_query("hedgerow"))).hits
+
+        assert [(hit.heading_path, hit.exact) for hit in hits] == [
+            (("Boundaries",), True),
+            (("Overview",), False),
+        ]
+
+    @pytest.mark.parametrize(
+        ("body", "text"),
+        [
+            pytest.param("Make a clam\nfor stock.", "claim for", id="across-blocks"),
+            pytest.param("Planting on an area.", "in", id="short-word"),
+            pytest.param("Make a claimant list.", "clam", id="part-of-a-word"),
+            pytest.param("Holding a number.", "hlding number", id="word-order"),
+        ],
+    )
+    async def test_finds_no_near_match_beyond_the_rules(self, chunk_index, body, text):
+        await chunk_index.replace_document(
+            *fixtures.document([Section("1 Overview", 1, (body,))]),
+        )
+
+        assert await _found(chunk_index, _query(text)) == []
+
     @pytest.mark.parametrize(
         ("text", "found"),
         [
@@ -418,7 +471,10 @@ class ChunkIndexContract:
 
         hits = await chunk_index.search_titles(_titles(text))
 
-        assert hits[0].document_id == fixtures.DOCUMENT_ID
+        assert (hits[0].document_id, hits[0].url) == (
+            fixtures.DOCUMENT_ID,
+            f"/guides/{fixtures.DOCUMENT_ID}",
+        )
 
     async def test_finds_only_titles_of_the_statuses_asked_for(self, chunk_index):
         await chunk_index.replace_document(*DRAFT)

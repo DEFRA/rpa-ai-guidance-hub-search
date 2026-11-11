@@ -84,6 +84,7 @@ URL = "url"
 TITLE = "title"
 TITLE_NGRAM = "title_ngram"
 HEADING_PATH = "heading_path"
+HEADING_NGRAM = "heading_ngram"
 SECTION_NUMBER = "section_number"
 BODY = "body"
 BODY_EXACT = "body_exact"
@@ -106,6 +107,7 @@ CHUNK_INDEX: tuple[IndexField, ...] = (
     IndexField(TITLE, FieldKind.TEXT, weight=2),
     IndexField(TITLE_NGRAM, FieldKind.TEXT_PARTIAL, stored=False),
     IndexField(HEADING_PATH, FieldKind.TEXT, weight=3, multi_valued=True),
+    IndexField(HEADING_NGRAM, FieldKind.TEXT_PARTIAL, stored=False),
     IndexField(SECTION_NUMBER, FieldKind.KEYWORD),
     IndexField(BODY, FieldKind.TEXT, weight=1),
     IndexField(BODY_EXACT, FieldKind.TEXT_EXACT, stored=False, weight=1),
@@ -135,6 +137,7 @@ def to_index_document(
         CHUNK_ID: chunk.chunk_id,
         SECTION_ID: chunk.section_id,
         HEADING_PATH: chunk.heading_path,
+        HEADING_NGRAM: "\n".join(chunk.heading_path) or None,
         SECTION_NUMBER: chunk.section_number,
         BODY: chunk.plain_text,
         BODY_EXACT: chunk.plain_text,
