@@ -52,8 +52,9 @@ class ChunkQuery:
 class SectionHit:
     """The best chunk of one matching section; `score` only orders one result.
 
-    `exact` is False for a near (typo-tolerant) match. `url` is the document's;
-    the section's deep link is `{url}#{anchor}`.
+    `exact` is False for a near (typo-tolerant) match. `matches` counts the
+    matches in the chunk's headings and text. `url` is the document's; the
+    section's deep link is `{url}#{anchor}`.
     """
 
     section_id: ids.SectionId
@@ -69,6 +70,7 @@ class SectionHit:
     plain_text: str
     score: float
     exact: bool = True
+    matches: int = 1
 
 
 @dataclasses.dataclass(frozen=True)
