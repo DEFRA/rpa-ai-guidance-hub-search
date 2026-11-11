@@ -42,7 +42,9 @@ def strip_inline(markdown: str) -> str:
     text = _TAG.sub("", text)
     text = _BREAK.sub(" ", text)
     text = _TRAILING_BREAK.sub("", text)
-    return " ".join(html.unescape(_restore(text)).split())
+    # Entities are decoded while escapes are still placeholders, so `\\&amp;`
+    # stays `&amp;` as the reader sees it.
+    return " ".join(_restore(html.unescape(text)).split())
 
 
 def links(markdown: str) -> list[tuple[str, str]]:
@@ -50,7 +52,7 @@ def links(markdown: str) -> list[tuple[str, str]]:
     text = _resolve_spans(_IMAGE.sub("", _protect(markdown)))
 
     return [
-        (strip_inline(_unprotect(match[1])), _target(_restore(match[2])))
+        (strip_inline(_unprotect(match[1])), _restore(html.unescape(_target(match[2]))))
         for match in _LINK.finditer(text)
     ]
 

@@ -123,9 +123,10 @@ class TestTheIds:
     )
     def test_must_be_the_cms_uuid7s(self, field, value):
         job = dataclasses.replace(guides.job(), **{field: value})
+        parser = guide_markdown.GuideMarkdownParser()
 
         with pytest.raises(guide_markdown.NotACmsIdError):
-            guide_markdown.GuideMarkdownParser().parse(job, NESTED)
+            parser.parse(job, NESTED)
 
 
 class TestSections:
@@ -308,7 +309,10 @@ class TestSectionIds:
         ]
 
     def test_chunking_twice_gives_identical_records(self):
-        assert _chunk(NESTED) == _chunk(NESTED)
+        first = _chunk(NESTED)
+        second = _chunk(NESTED)
+
+        assert first == second
 
     def test_chunk_ids_hash_strategy_section_and_part(self):
         _, chunks = _chunk(NESTED)

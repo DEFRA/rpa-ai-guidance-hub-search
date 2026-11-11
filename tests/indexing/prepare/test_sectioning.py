@@ -40,6 +40,19 @@ class TestBuild:
             ("Payments",),
         ]
 
+    def test_a_heading_after_a_skipped_level_is_a_sibling(self):
+        built = _build(
+            _section("Claims", 2),
+            _section("Photographs", 4),
+            _section("Maps", 4),
+        )
+
+        assert [section.heading_path for section in built] == [
+            ("Claims",),
+            ("Claims", "Photographs"),
+            ("Claims", "Maps"),
+        ]
+
     def test_keeps_a_section_id_the_source_gave(self):
         given = ids.SectionId("given")
 

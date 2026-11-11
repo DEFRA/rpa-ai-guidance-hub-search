@@ -41,6 +41,9 @@ class TestStripInline:
     def test_keeps_an_escaped_entity_as_typed(self):
         assert plain_text.strip_inline("&amp;amp;") == "&amp;"
 
+    def test_keeps_an_entity_after_an_escaped_ampersand_as_typed(self):
+        assert plain_text.strip_inline("\\&amp; x") == "&amp; x"
+
 
 class TestLinks:
     def test_finds_each_link_with_its_plain_label(self):
@@ -54,6 +57,16 @@ class TestLinks:
     def test_keeps_balanced_parentheses_in_a_target(self):
         assert plain_text.links("[m](https://e.com/m(2021).xlsx)") == [
             ("m", "https://e.com/m(2021).xlsx"),
+        ]
+
+    def test_decodes_entities_in_a_target(self):
+        assert plain_text.links("[p](https://e.com/?a=1&amp;b=2)") == [
+            ("p", "https://e.com/?a=1&b=2"),
+        ]
+
+    def test_keeps_an_escaped_ampersand_in_a_target_as_typed(self):
+        assert plain_text.links("[p](https://e.com/?q=\\&amp;)") == [
+            ("p", "https://e.com/?q=&amp;"),
         ]
 
     def test_finds_a_link_round_a_colour_span(self):

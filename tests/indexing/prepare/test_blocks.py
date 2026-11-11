@@ -38,6 +38,17 @@ class TestParse:
             (Kind.LIST, ("numbered",)),
         ]
 
+    def test_a_blank_line_between_items_keeps_one_list(self, chef):
+        assert _kinds("- first\n\n- second\n\n1. numbered\n\n2. next", chef) == [
+            (Kind.LIST, ("first", "second")),
+            (Kind.LIST, ("numbered", "next")),
+        ]
+
+    def test_an_escaped_backslash_is_not_a_hard_break(self, chef):
+        assert _kinds("Line one\\\\\nline two", chef) == [
+            (Kind.PARAGRAPH, ("Line one\\ line two",)),
+        ]
+
     def test_a_blockquote_is_one_block_with_a_line_per_paragraph(self, chef):
         body = "> Dear [name]\n>\n> We will visit.\n>\n> - gates\n> - stock"
 

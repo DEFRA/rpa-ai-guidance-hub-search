@@ -56,7 +56,7 @@ def build(document: sources.SourceDocument) -> list[models.SectionRecord]:
 def _heading_paths(
     sections: Sequence[sources.SourceSection],
 ) -> list[tuple[str, ...]]:
-    stack: list[str] = []
+    stack: list[tuple[int, str]] = []
     paths: list[tuple[str, ...]] = []
 
     for section in sections:
@@ -64,9 +64,13 @@ def _heading_paths(
             paths.append(())
             continue
 
-        del stack[section.level - 1 :]
-        stack.append(section.heading)
-        paths.append(tuple(stack))
+        # By level, not depth, so a heading after a skipped level is a sibling
+        # of the one before it, as in `_parents`.
+        while stack and stack[-1][0] >= section.level:
+            stack.pop()
+
+        stack.append((section.level, section.heading))
+        paths.append(tuple(heading for _, heading in stack))
 
     return paths
 

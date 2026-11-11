@@ -17,10 +17,10 @@ import chonkie
 from app.indexing.prepare import plain_text
 from app.records import models
 
-_LIST_MARKER = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+# Groups: indent, bullet, ordered delimiter. Items of one list share all three.
+_LIST_MARKER = re.compile(r"^(\s*)(?:([-*+])|\d+([.)]))\s+")
 _QUOTE_MARKER = re.compile(r"^>\s?")
 _TABLE_DELIMITER = re.compile(r"^\|(?:\s*:?-+:?\s*\|)+\s*$")
-_HARD_BREAK = re.compile(r"(?<!\\)(?:\\\\)*\\$")
 _ESCAPED_PIPE = "\\|"
 _PIPE_PLACEHOLDER = "\x00"
 
@@ -56,7 +56,7 @@ def _text_blocks(text: str) -> list[models.Block]:
             if (
                 kind is models.BlockKind.LIST
                 and current
-                and _list_continues(lines, index)
+                and _list_continues(lines, index, current[0])
             ):
                 current.append(line)
             elif current:
@@ -105,10 +105,23 @@ def _starts_new_block(
             return True
 
 
-def _list_continues(lines: Sequence[str], blank: int) -> bool:
-    """An indented line after a blank one is a continuation of the item above it."""
+def _list_continues(lines: Sequence[str], blank: int, first: str) -> bool:
+    """Whether the list starting `first` goes on past the blank line at `blank`.
+
+    It does when the next line is indented (a continuation of the item above) or
+    is another item of the same list: same indent and the same kind of marker.
+    """
     following = next((line for line in lines[blank + 1 :] if line.strip()), None)
-    return following is not None and following[:1].isspace()
+
+    if following is None:
+        return False
+
+    if following[:1].isspace():
+        return True
+
+    item = _LIST_MARKER.match(following)
+    opening = _LIST_MARKER.match(first)
+    return bool(item and opening and item.groups() == opening.groups())
 
 
 def _block(kind: models.BlockKind, lines: Sequence[str]) -> models.Block:
@@ -140,10 +153,15 @@ def _logical_lines(lines: Sequence[str]) -> tuple[str, ...]:
         else:
             groups[-1].append(line)
 
-        breaks = bool(_HARD_BREAK.search(line.rstrip()))
+        breaks = _ends_with_hard_break(line.rstrip())
 
     stripped = (plain_text.strip_inline(" ".join(group)) for group in groups)
     return tuple(line for line in stripped if line)
+
+
+def _ends_with_hard_break(line: str) -> bool:
+    """An odd run of trailing backslashes: the last one is not itself escaped."""
+    return (len(line) - len(line.rstrip("\\"))) % 2 == 1
 
 
 def _quote_lines(lines: Sequence[str]) -> tuple[str, ...]:
