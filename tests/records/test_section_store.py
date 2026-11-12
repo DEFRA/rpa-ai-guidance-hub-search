@@ -54,3 +54,23 @@ class TestS3SectionStore:
 
         with pytest.raises(moto_s3.exceptions.NoSuchBucket):
             await absent.get(header.document_id, header.version_id)
+
+    async def test_deletes_the_version(self, store):
+        header, sections = DOCUMENT
+        await store.put(header, sections)
+
+        await store.delete(header.document_id, header.version_id)
+
+        assert await store.get(header.document_id, header.version_id) is None
+
+    async def test_deleting_a_version_never_written_is_a_no_op(self, store):
+        header, _ = DOCUMENT
+
+        await store.delete(header.document_id, header.version_id)
+
+    async def test_raises_other_errors_deleting(self, moto_s3):
+        header, _ = DOCUMENT
+        absent = section_store.S3SectionStore(moto_s3, "absent")
+
+        with pytest.raises(moto_s3.exceptions.NoSuchBucket):
+            await absent.delete(header.document_id, header.version_id)

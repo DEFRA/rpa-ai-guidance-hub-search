@@ -1,3 +1,4 @@
+import enum
 import logging
 import pathlib
 import tempfile
@@ -110,6 +111,18 @@ def _parse_reference_options(v: str) -> list[dict[str, str]]:
     return options
 
 
+class IngestionMode(enum.StrEnum):
+    """How documents reach the service.
+
+    `http` mounts the ingestion routes, for the CMS to push to. `s3` leaves them
+    out, and documents arrive only through the `index-document` CLI, which works
+    in both modes.
+    """
+
+    HTTP = "http"
+    S3 = "s3"
+
+
 class AppConfig(pydantic_settings.BaseSettings):
     model_config = pydantic_settings.SettingsConfigDict()
     python_env: str | None = None
@@ -129,6 +142,7 @@ class AppConfig(pydantic_settings.BaseSettings):
     )
     http_proxy: pydantic.HttpUrl | None = None
     enable_metrics: bool = False
+    ingestion_mode: IngestionMode = IngestionMode.HTTP
     tracing_header: str = "x-cdp-request-id"
     claude_sonnet_model_config: Annotated[
         BedrockModelConfig, pydantic_settings.NoDecode

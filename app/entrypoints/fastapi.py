@@ -10,6 +10,7 @@ from app import config as app_config
 from app.common import mongo, tracing
 from app.health import router as health_router
 from app.index import active_index, builds
+from app.ingestion import router as ingestion_router
 
 logger = getLogger(__name__)
 
@@ -31,11 +32,25 @@ async def lifespan(_: fastapi.FastAPI) -> AsyncGenerator[None]:
         logger.info("MongoDB client closed")
 
 
-app = fastapi.FastAPI(lifespan=lifespan, title="RPA Guidance Hub Search API")
+def create_app(
+    ingestion_mode: app_config.IngestionMode | None = None,
+) -> fastapi.FastAPI:
+    """Build the app, mounting the ingestion routes only in `http` mode.
 
-app.add_middleware(tracing.TraceIdMiddleware)
+    A factory rather than a module-level app, so importing this module never
+    builds `AppConfig`. Without an explicit mode it reads `INGESTION_MODE`.
+    """
+    if ingestion_mode is None:
+        ingestion_mode = app_config.get_config().ingestion_mode
 
-app.include_router(health_router.router)
+    app = fastapi.FastAPI(lifespan=lifespan, title="RPA Guidance Hub Search API")
+    app.add_middleware(tracing.TraceIdMiddleware)
+    app.include_router(health_router.router)
+
+    if ingestion_mode is app_config.IngestionMode.HTTP:
+        app.include_router(ingestion_router.router)
+
+    return app
 
 
 def main() -> None:  # pragma: no cover
@@ -49,7 +64,8 @@ def main() -> None:  # pragma: no cover
         os.environ.pop("HTTPS_PROXY", None)
 
     uvicorn.run(
-        "app.entrypoints.fastapi:app",
+        "app.entrypoints.fastapi:create_app",
+        factory=True,
         host=config.host,
         port=config.port,
         log_config=config.log_config,

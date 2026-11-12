@@ -125,6 +125,24 @@ class ChunkWriter(Protocol):
         """No-op if absent."""
         ...
 
+    async def remove_version(
+        self,
+        document_id: ids.DocumentId,
+        version_id: ids.VersionId,
+    ) -> None:
+        """Removes the document only if this is the version indexed for it.
+
+        A no-op if the document is absent or another version is indexed.
+        """
+        ...
+
+    async def indexed_version(
+        self,
+        document_id: ids.DocumentId,
+    ) -> ids.VersionId | None:
+        """The version indexed for the document; `None` if it is absent."""
+        ...
+
 
 class ChunkRetriever(Protocol):
     async def search(self, query: ChunkQuery) -> SectionHits:

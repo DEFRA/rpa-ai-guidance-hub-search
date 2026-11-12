@@ -1,9 +1,10 @@
-"""The two jobs of indexing one document version, whatever asked for it.
+"""The jobs of indexing one document version, whatever asked for it.
 
 `IndexJob` asks for a version to be prepared: read, sectioned and chunked.
 Preparing it produces an `ApplyJob`, which asks for the staged chunks to be
 written to the index. The two run as separate steps so that, later, any number
-of workers can prepare while a single writer applies.
+of workers can prepare while a single writer applies. `RemoveJob` asks the
+same writer to take a version out of the index.
 """
 
 import dataclasses
@@ -60,3 +61,24 @@ class ApplyJob:
         if self.occurred_at.utcoffset() is None:
             msg = "occurred_at must be timezone-aware"
             raise ValueError(msg)
+
+
+@dataclasses.dataclass(frozen=True)
+class RemoveJob:
+    """Take this version out of the index, if it is the version indexed.
+
+    Covers every status of the version. `occurred_at` is when it was deleted.
+    """
+
+    document_id: ids.DocumentId
+    version_id: ids.VersionId
+    occurred_at: dt.datetime
+
+    def __post_init__(self) -> None:
+        if self.occurred_at.utcoffset() is None:
+            msg = "occurred_at must be timezone-aware"
+            raise ValueError(msg)
+
+
+WriteJob = ApplyJob | RemoveJob
+"""A job for the single writer of the index."""

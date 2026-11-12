@@ -25,3 +25,10 @@ class InMemorySectionStore:
         version_id: ids.VersionId,
     ) -> tuple[models.DocumentHeader, tuple[models.SectionRecord, ...]] | None:
         return self.files.get((document_id, version_id))
+
+    async def delete(
+        self,
+        document_id: ids.DocumentId,
+        version_id: ids.VersionId,
+    ) -> None:
+        self.files.pop((document_id, version_id), None)

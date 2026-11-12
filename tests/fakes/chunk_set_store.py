@@ -1,6 +1,6 @@
 """In-memory `ChunkSetStore`."""
 
-from app.records import chunk_sets
+from app.records import chunk_sets, ids, models
 
 
 class InMemoryChunkSetStore:
@@ -13,3 +13,14 @@ class InMemoryChunkSetStore:
 
     async def get(self, key: str) -> chunk_sets.ChunkSet | None:
         return self.sets.get(key)
+
+    async def delete(
+        self,
+        strategy: str,
+        document_id: ids.DocumentId,
+        version_id: ids.VersionId,
+    ) -> None:
+        for status in models.DocumentStatus:
+            self.sets.pop(
+                chunk_sets.key(strategy, document_id, version_id, status), None
+            )

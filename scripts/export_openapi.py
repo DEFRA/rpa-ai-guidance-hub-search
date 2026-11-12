@@ -5,8 +5,9 @@
     uv run task openapi-check    # exit 1 if the committed file is out of date
 
 The document is built from the FastAPI app without starting it, so no Mongo, S3 or
-Bedrock is involved. Importing the app does not construct ``AppConfig``, so none of
-its required environment variables need to be set.
+Bedrock is involved. The app is built in ``http`` ingestion mode, so the document
+always includes the ingestion routes, and an explicit mode means ``AppConfig`` is
+never constructed, so none of its required environment variables need to be set.
 """
 
 import argparse
@@ -14,12 +15,14 @@ import json
 import sys
 from pathlib import Path
 
-from app.entrypoints.fastapi import app
+from app import config
+from app.entrypoints import fastapi as entrypoint
 
 OPENAPI_PATH = Path(__file__).resolve().parent.parent / "docs" / "openapi.json"
 
 
 def render() -> str:
+    app = entrypoint.create_app(config.IngestionMode.HTTP)
     return json.dumps(app.openapi(), indent=2, sort_keys=True) + "\n"
 
 

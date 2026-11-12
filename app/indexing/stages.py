@@ -16,6 +16,17 @@ class Preparer(Protocol):
 
 
 class Applier(Protocol):
-    async def apply(self, job: jobs.ApplyJob) -> None:
-        """Makes the staged chunks the document's entries in the index."""
+    async def apply(self, job: jobs.ApplyJob) -> bool:
+        """Makes the staged chunks the document's entries in the index.
+
+        False when it left the index unchanged because a newer version of the
+        document is already indexed.
+        """
+        ...
+
+    async def remove(self, job: jobs.RemoveJob) -> bool:
+        """Takes the version out of the index if it is the version indexed.
+
+        False when it left the index unchanged.
+        """
         ...

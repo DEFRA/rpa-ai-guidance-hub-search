@@ -1,13 +1,24 @@
 """Staged chunk sets in the search-store bucket."""
 
+import uuid
+
 import pytest
 
-from app.records import chunk_set_store, chunk_sets
+from app.records import chunk_set_store, chunk_sets, ids, models
 from tests.support import chunks as fixtures
 
 BUCKET = "search-store"
-HEADER, CHUNKS = fixtures.document([fixtures.Section("1 Overview", 1, ("Read me.",))])
+SECTIONS = [fixtures.Section("1 Overview", 1, ("Read me.",))]
+HEADER, CHUNKS = fixtures.document(SECTIONS)
 CHUNK_SET = chunk_sets.ChunkSet(HEADER, fixtures.FIXTURE_STRATEGY, tuple(CHUNKS))
+OTHER_VERSION_ID = ids.VersionId(uuid.UUID("0199b8a2-0000-7000-8000-000000000003"))
+
+
+def chunk_set(**header_fields):
+    header, chunks = fixtures.document(
+        SECTIONS, document_header=fixtures.header(**header_fields)
+    )
+    return chunk_sets.ChunkSet(header, fixtures.FIXTURE_STRATEGY, tuple(chunks))
 
 
 @pytest.fixture
@@ -41,3 +52,42 @@ class TestS3ChunkSetStore:
 
         with pytest.raises(moto_s3.exceptions.NoSuchBucket):
             await absent.get(CHUNK_SET.key)
+
+    async def test_deletes_the_version_at_every_status(self, store):
+        published = chunk_set(status=models.DocumentStatus.PUBLISHED)
+        ready = chunk_set(status=models.DocumentStatus.READY_FOR_PUBLISH)
+        await store.put(published)
+        await store.put(ready)
+
+        await store.delete(
+            fixtures.FIXTURE_STRATEGY, fixtures.DOCUMENT_ID, fixtures.VERSION_ID
+        )
+
+        assert await store.get(published.key) is None
+        assert await store.get(ready.key) is None
+
+    async def test_delete_leaves_other_versions_and_strategies(self, store):
+        other_version = chunk_set(version_id=OTHER_VERSION_ID)
+        await store.put(CHUNK_SET)
+        await store.put(other_version)
+
+        await store.delete("other", fixtures.DOCUMENT_ID, fixtures.VERSION_ID)
+        await store.delete(
+            fixtures.FIXTURE_STRATEGY, fixtures.DOCUMENT_ID, OTHER_VERSION_ID
+        )
+
+        assert await store.get(CHUNK_SET.key) == CHUNK_SET
+        assert await store.get(other_version.key) is None
+
+    async def test_deleting_a_version_never_staged_is_a_no_op(self, store):
+        await store.delete(
+            fixtures.FIXTURE_STRATEGY, fixtures.DOCUMENT_ID, fixtures.VERSION_ID
+        )
+
+    async def test_raises_other_errors_deleting(self, moto_s3):
+        absent = chunk_set_store.S3ChunkSetStore(moto_s3, "absent")
+
+        with pytest.raises(moto_s3.exceptions.NoSuchBucket):
+            await absent.delete(
+                fixtures.FIXTURE_STRATEGY, fixtures.DOCUMENT_ID, fixtures.VERSION_ID
+            )

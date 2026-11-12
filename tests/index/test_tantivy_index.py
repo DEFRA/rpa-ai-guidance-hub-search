@@ -191,6 +191,62 @@ class TestRemovingADocument:
         assert _entries(directory) == []
 
 
+class TestRemovingAVersion:
+    async def test_removes_every_entry_when_it_is_the_indexed_version(
+        self, chunk_index, directory
+    ):
+        header, _ = CLAIMS
+        await chunk_index.replace_document(*CLAIMS)
+
+        await chunk_index.remove_version(header.document_id, header.version_id)
+
+        assert _entries(directory) == []
+
+    async def test_leaves_the_document_when_another_version_is_indexed(
+        self, chunk_index, directory
+    ):
+        header, _ = CLAIMS
+        await chunk_index.replace_document(*CLAIMS)
+
+        await chunk_index.remove_version(header.document_id, NEXT_VERSION_ID)
+
+        assert len(_entries(directory)) == 4
+
+    async def test_leaves_other_documents(self, chunk_index, directory):
+        header, _ = CLAIMS
+        other = fixtures.document(
+            [Section("1 Woodland", 1)],
+            fixtures.header(document_id=OTHER_DOCUMENT_ID),
+        )
+        await chunk_index.replace_document(*CLAIMS)
+        await chunk_index.replace_document(*other)
+
+        await chunk_index.remove_version(header.document_id, header.version_id)
+
+        assert _values(_entries(directory), index_schema.DOCUMENT_ID) == [
+            str(OTHER_DOCUMENT_ID),
+            str(OTHER_DOCUMENT_ID),
+        ]
+
+
+class TestIndexedVersion:
+    async def test_is_the_version_last_replaced(self, chunk_index):
+        header, chunks = CLAIMS
+        await chunk_index.replace_document(header, chunks)
+        await chunk_index.replace_document(
+            dataclasses.replace(header, version_id=NEXT_VERSION_ID),
+            [
+                dataclasses.replace(chunk, version_id=NEXT_VERSION_ID)
+                for chunk in chunks
+            ],
+        )
+
+        assert await chunk_index.indexed_version(header.document_id) == NEXT_VERSION_ID
+
+    async def test_is_none_for_an_absent_document(self, chunk_index):
+        assert await chunk_index.indexed_version(OTHER_DOCUMENT_ID) is None
+
+
 class TestOpeningTheIndex:
     async def test_reopens_what_an_earlier_instance_wrote(self, directory):
         await tantivy_index.TantivyChunkIndex(directory).replace_document(*CLAIMS)
