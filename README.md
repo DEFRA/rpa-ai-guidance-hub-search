@@ -68,28 +68,13 @@ The application uses AWS Bedrock for LLM access. The following environment varia
 
 The `CLAUDE_SONNET_MODEL_CONFIG` format is: `model_id,inference_profile[,guardrail_id:guardrail_version]`
 
-#### Reference Data Configuration
+#### Ingestion Configuration
 
-The `/reference/*` endpoints (see [API endpoints](#api-endpoints)) serve the option lists for the
-metadata capture journey's radio/checkbox questions. Each list is config/env-var driven only - no
-database, no admin UI. The following environment variables are **required**; like
-`CLAUDE_SONNET_MODEL_CONFIG`, the application refuses to start if one is missing or malformed:
-
-| Variable | Description | Example |
+| Variable | Description | Default |
 | --- | --- | --- |
-| `REFERENCE_SCHEMES` | Options for "Which scheme does this guidance relate to?" | `basic-payment-scheme:Basic Payment Scheme,not-specific:Not scheme-specific` |
-| `REFERENCE_AUDIENCES` | Options for "Who is this for?" | `caseworker:Caseworker,customer:Customer` |
-| `REFERENCE_SYSTEMS` | Options for "What systems does this guidance relate to?" | `siti-agri:Siti Agri,crm:CRM` |
-| `REFERENCE_GUIDANCE_TYPES` | Options for the guidance type question | `process-guide:Process guide` |
-
-Guides are stored, and filtered on, by these keys, but `GET /guides` and `GET /guides/{id}` answer
-with each key replaced by its label in `metadata.schemes`, `systems`, `audience` and `guidanceType`,
-so a reader needs no call to `/reference/*` to display them. A key no longer in the list is shown
-as it is, and a scheme of `none` reads "Not scheme-specific".
-
-Each variable's format is a comma-separated list of `value:label` pairs, in display order. Each
-endpoint returns that list unchanged, as `[{"value": ..., "label": ...}, ...]` - see `/docs` for the
-generated OpenAPI schema.
+| `INGESTION_MODE` | `http` mounts the [ingestion routes](#api-endpoints) for the CMS to push document versions to; `s3` leaves them out. The `index-document` script works in both. | `http` |
+| `MAX_INLINE_CONTENT_BYTES` | The largest inline `content.markdown` an index request may carry; larger is refused with 413, and should be sent as `contentUrl` | `2097152` (2 MiB) |
+| `SEARCH_STORE_S3_BUCKET` | Where sections, staged chunk sets and index builds are kept | `rpa-ai-guidance-hub-search-store` |
 
 ### Linting and Formatting
 
@@ -213,6 +198,27 @@ This loads configuration from `.env`, and enables hot-reload when `PYTHON_ENV=de
 
 The service will then run on `http://localhost:8085`
 
+#### Sending it a document
+
+With the service running, send it a guide version the way the CMS will. The
+reply is `202`; the outcome is in the service's log.
+
+```bash
+# inline content, optionally with the API's section ids
+uv run task send-document --document-id <uuid7> --version-id <uuid7> \
+    --title "Claims Guidance" --content-file guide.md [--section-ids sections.json]
+
+# content the API has stored in S3
+uv run task send-document --document-id <uuid7> --version-id <uuid7> \
+    --title "Claims Guidance" --content-url s3://<bucket>/<doc>/<ver>/content.md
+
+# remove the version
+uv run task send-document --document-id <uuid7> --version-id <uuid7> --delete
+```
+
+See [`scripts/README.md`](scripts/README.md) for `index-document`, which indexes a
+version from S3 without the HTTP routes.
+
 ### Testing
 
 Ensure the python virtual environment is configured and libraries are installed using `uv sync`, [as above](#python)
@@ -254,15 +260,14 @@ HTTP JSON  <-  schemas.py   Pydantic: from_model() and conversions to models
 
 ### Ids
 
-`app/guidance/ids.py` gives each kind of id a type of its own (`typing.NewType`), so
+`app/records/ids.py` gives each kind of id a type of its own (`typing.NewType`), so
 mypy refuses one where another belongs:
 
-- **Ours**, `DocumentId` and `VersionId`, are uuids, version 7 (time-ordered), minted
-  only by `new_document_id()` and `new_version_id()`. Mongo stores them as native
-  uuids; they become text only as an S3 prefix or on the wire, where the OpenAPI
-  document says `format: uuid`. A path id that isn't a uuid is refused with 422.
-- **Other services'**, cdp-uploader's `UploadId` and `FileId`, are `str`: taken as
-  given, not claimed to be uuids. So is the signed-in user's id.
+- **`DocumentId` and `VersionId`** are uuids. A guide's are the CMS's, always
+  version 7 (time-ordered), and refused otherwise: a path id that isn't one is
+  answered with 422. A source without ids of its own mints them (`minted_id`).
+- **`SectionId` and `ChunkId`** are `str`, hashed from what they identify unless
+  the source supplies its own.
 
 ## API endpoints
 
@@ -270,18 +275,13 @@ mypy refuses one where another belongs:
 |:--------------------------------| :----------------------------- |
 | `GET: /docs`                    | Automatic API Swagger docs (the same document is committed as `docs/openapi.json`; regenerate with `uv run task openapi`) |
 | `GET: /health`                  | Health check endpoint          |
-| `GET: /reference/schemes`       | Scheme options for the "Which scheme does this guidance relate to?" radios |
-| `GET: /reference/audiences`     | Audience options for the "Who is this for?" checkboxes |
-| `GET: /reference/systems`       | System options for the "What systems...?" checkboxes |
-| `GET: /reference/guidance-types`| Guidance type options |
-| `GET: /review/assets`           | Simple example endpoint        |
-| `GET: /guides`                  | A page of guides, newest first; `limit`, `cursor`, and repeatable `scheme`, `system`, `audience`, `guidance_type` filters |
-| `POST: /guides`                 | Creates a guide (201)          |
-| `GET: /guides/{id}`             | A guide and all its versions   |
-| `GET: /guides/{id}/content`     | The Markdown of a guide's newest version, as plain text |
-| `GET: /guides/{id}/assets/{name}` | Gets asset content by name   |
-| `POST: /guides/staging/callback` | cdp-uploader callback for an uploaded file (202; processed in the background) |
-| `GET: /guides/staging/{file_id}` | Conversion outcome of a staged file (404 if unknown) |
+| `PUT: /documents/{documentId}/versions/{versionId}` | Index a version (202). The body carries exactly one of `contentUrl` (`s3://…/content.md`) or `content` (`markdown`, optional `sectionIds`), plus `status`, `occurredAt`, `versionNumber` and the CMS `metadata`. `status` must be `published` (the index holds one version per document, so anything else is refused with 422), and `metadata.guideTitle` is required: it is the indexed title, never the Markdown's `# ` line. A version older than the one indexed is skipped. `http` mode only. |
+| `DELETE: /documents/{documentId}/versions/{versionId}` | Remove a version at every status (202): from the index if it is the version indexed, and its staged files. `http` mode only. |
+
+Both ingestion routes reply once the request is valid and do the work afterwards,
+one request at a time per replica. A failure is logged and counted
+(`IngestionFailed`, with `ENABLE_METRICS`), not retried: resending the same request
+is always safe.
 
 ## Custom Cloudwatch Metrics
 

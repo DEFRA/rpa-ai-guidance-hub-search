@@ -1,6 +1,7 @@
 """Parses a guide's `content.md` (the API's Markdown dialect) into a `SourceDocument`.
 
-The guide's title is its single `#` line. Each `##` or deeper heading starts a
+The guide's title is the CMS's when the caller has it, otherwise its single `#`
+line; a `#` line is never a section. Each `##` or deeper heading starts a
 section, and its level is the number of hashes minus one. Any text before the
 first `##` is a level-0 section with no heading and no anchor. Anchors follow
 the API's rules (`anchors`); section numbers such as `4.2.1` are split off the
@@ -55,15 +56,23 @@ class GuideMarkdownParser:
         job: jobs.IndexJob,
         markdown: str,
         section_ids: Mapping[str, ids.SectionId] | None = None,
+        metadata: source_metadata.GuideMetadata | None = None,
+        title: str | None = None,
     ) -> sources.SourceDocument:
         """Sync and CPU-bound. Raises `MalformedGuideError`, or `NotACmsIdError`.
 
         `section_ids` is the API's anchor-to-section-ID map, when it has one.
         Sections it doesn't name get hashed ids. A guide never mints ids: the
-        job must carry the CMS's UUIDv7 document and version ids.
+        job must carry the CMS's UUIDv7 document and version ids. `metadata`
+        goes in the header as given; without it the header's is empty.
+
+        `title` is the CMS's title. Given one, the Markdown may have at most one
+        `# ` line, which is skipped; without one, it must have exactly one, and
+        that is the title.
         """
         version_id = _cms_ids(job)
-        title, sections = _split(job, markdown)
+        markdown_title, sections = _split(job, markdown, needs_title=title is None)
+        title = title or markdown_title
         header = models.DocumentHeader(
             document_id=job.document_id,
             version_id=version_id,
@@ -73,7 +82,7 @@ class GuideMarkdownParser:
             url=url(job.document_id),
             content_url=job.content_url,
             occurred_at=job.occurred_at,
-            source=source_metadata.GuideMetadata.empty(),
+            source=metadata or source_metadata.GuideMetadata.empty(),
         )
         section_anchors = _anchors(sections)
 
@@ -106,14 +115,21 @@ def _cms_ids(job: jobs.IndexJob) -> ids.VersionId:
     return job.version_id
 
 
-def _split(job: jobs.IndexJob, markdown: str) -> tuple[str, list[_Section]]:
+def _split(
+    job: jobs.IndexJob,
+    markdown: str,
+    *,
+    needs_title: bool,
+) -> tuple[str, list[_Section]]:
+    """The Markdown's title ("" when it has none and none is needed), and sections."""
     lines = markdown.splitlines()
     titles = [match for line in lines if (match := _TITLE.fullmatch(line.rstrip()))]
 
-    if len(titles) != 1:
+    if len(titles) > 1 or (needs_title and not titles):
+        expected = "exactly one" if needs_title else "at most one"
         msg = (
             f"guide {job.document_id} version {job.version_id} has "
-            f"{len(titles)} '# ' title lines; expected exactly one"
+            f"{len(titles)} '# ' title lines; expected {expected}"
         )
         raise MalformedGuideError(msg)
 
@@ -140,7 +156,8 @@ def _split(job: jobs.IndexJob, markdown: str) -> tuple[str, list[_Section]]:
     if sections[0].rendered is None and not sections[0].body.strip():
         sections.pop(0)
 
-    return plain_text.strip_inline(titles[0]["text"]), sections
+    title = plain_text.strip_inline(titles[0]["text"]) if titles else ""
+    return title, sections
 
 
 def _anchors(sections: Sequence[_Section]) -> list[str]:

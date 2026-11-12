@@ -7,9 +7,10 @@ some), and treat every metadata key as optional, since the API stores metadata
 untyped.
 
 `to_metadata` turns a guide and one of its versions into the canonical
-`GuideMetadata` the header carries. Nothing calls the CMS API yet: a reader or
-entry point parses a response with `CmsGuide.model_validate` once a delivery
-path exists. A GOV.UK source gets a sibling module of Content API models.
+`GuideMetadata` the header carries; `version_metadata` does the same from the
+details and version number the CMS sends when it pushes a version. Nothing
+calls the CMS API itself. A GOV.UK source gets a sibling module of Content API
+models.
 """
 
 import datetime as dt
@@ -99,16 +100,23 @@ class CmsGuide(_CmsModel):
 
 
 def to_metadata(guide: CmsGuide, version: CmsVersion) -> source_metadata.GuideMetadata:
-    """The canonical metadata of one version of `guide`.
+    """The canonical metadata of one version of `guide`."""
+    return version_metadata(guide.metadata, version.version_number)
+
+
+def version_metadata(
+    details: CmsGuideMetadata,
+    version_number: str | None,
+) -> source_metadata.GuideMetadata:
+    """The canonical metadata of a version with these details and number.
 
     The authoring notes (`goal`, `requirements`) are not search data and are
     left out.
     """
-    details = guide.metadata
     guidance_type = details.guidance_type
 
     return source_metadata.GuideMetadata(
-        version_number=version.version_number,
+        version_number=version_number,
         schemes=details.schemes,
         scheme_year=details.scheme_year,
         systems=details.systems,
