@@ -18,6 +18,7 @@ class InMemoryChunkIndex:
             ids.DocumentId,
             tuple[models.DocumentHeader, tuple[models.ChunkRecord, ...]],
         ] = {}
+        self._latest: dict[ids.DocumentId, ids.VersionId] = {}
 
     async def replace_document(
         self,
@@ -32,8 +33,11 @@ class InMemoryChunkIndex:
         else:
             self._documents.pop(header.document_id, None)
 
+        self._latest[header.document_id] = header.version_id
+
     async def remove_document(self, document_id: ids.DocumentId) -> None:
         self._documents.pop(document_id, None)
+        self._latest.pop(document_id, None)
 
     async def remove_version(
         self,
@@ -43,12 +47,23 @@ class InMemoryChunkIndex:
         if await self.indexed_version(document_id) == version_id:
             del self._documents[document_id]
 
+        latest = self._latest.get(document_id)
+
+        if latest is None or not ids.is_older(version_id, latest):
+            self._latest[document_id] = version_id
+
     async def indexed_version(
         self,
         document_id: ids.DocumentId,
     ) -> ids.VersionId | None:
         entry = self._documents.get(document_id)
         return entry[0].version_id if entry else None
+
+    async def latest_version(
+        self,
+        document_id: ids.DocumentId,
+    ) -> ids.VersionId | None:
+        return self._latest.get(document_id)
 
     async def search(self, query: chunk_index.ChunkQuery) -> chunk_index.SectionHits:
         best: dict[ids.SectionId, chunk_index.SectionHit] = {}

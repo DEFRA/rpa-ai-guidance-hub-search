@@ -13,6 +13,12 @@ import datetime as dt
 from app.records import ids, models
 
 
+def _require_aware(occurred_at: dt.datetime) -> None:
+    if occurred_at.utcoffset() is None:
+        msg = "occurred_at must be timezone-aware"
+        raise ValueError(msg)
+
+
 @dataclasses.dataclass(frozen=True)
 class IndexJob:
     """Index this version of the document at this status.
@@ -35,9 +41,7 @@ class IndexJob:
     occurred_at: dt.datetime
 
     def __post_init__(self) -> None:
-        if self.occurred_at.utcoffset() is None:
-            msg = "occurred_at must be timezone-aware"
-            raise ValueError(msg)
+        _require_aware(self.occurred_at)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -58,9 +62,7 @@ class ApplyJob:
     chunk_set_key: str
 
     def __post_init__(self) -> None:
-        if self.occurred_at.utcoffset() is None:
-            msg = "occurred_at must be timezone-aware"
-            raise ValueError(msg)
+        _require_aware(self.occurred_at)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -75,9 +77,7 @@ class RemoveJob:
     occurred_at: dt.datetime
 
     def __post_init__(self) -> None:
-        if self.occurred_at.utcoffset() is None:
-            msg = "occurred_at must be timezone-aware"
-            raise ValueError(msg)
+        _require_aware(self.occurred_at)
 
 
 WriteJob = ApplyJob | RemoveJob

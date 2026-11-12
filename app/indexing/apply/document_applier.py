@@ -5,9 +5,11 @@ the sectioning or a chunking strategy. It refuses chunks made by a strategy
 other than the one the index schema holds (`index_schema.CHUNK_STRATEGY`).
 Wiring lives in `from_config`.
 
-It never lets an older version replace a newer one (by UUIDv7 order), and
-removes a version only while it is the one indexed. Both checks read the same
-copy of the index they change.
+It never lets an older version replace a newer one (by UUIDv7 order), nor
+bring back a version that was removed. The index remembers the latest version
+it has applied or removed, even once no content is left, so a delayed or
+retried apply can't undo a newer version or a deletion. Every check reads the
+same copy of the index it changes.
 
 `publish` applies or removes a job against the shared index:
 
@@ -28,8 +30,6 @@ from app.indexing import jobs
 from app.records import chunk_set_store, chunk_sets, ids
 
 logger = logging.getLogger(__name__)
-
-_TIME_ORDERED = 7
 
 
 class ChunkSetNotFoundError(LookupError):
@@ -75,15 +75,15 @@ class DocumentApplier:
             msg = f"the chunk set at {job.chunk_set_key} is not the job's"
             raise ChunkSetMismatchError(msg)
 
-        indexed = await self._writer.indexed_version(job.document_id)
+        latest = await self._writer.latest_version(job.document_id)
 
-        if indexed is not None and _is_older(job.version_id, indexed):
+        if latest is not None and await self._is_superseded(job, latest):
             logger.info(
-                "Skipped %s version %s (%s): newer version %s is indexed",
+                "Skipped %s version %s (%s): version %s has been seen since",
                 job.document_id,
                 job.version_id,
                 job.status,
-                indexed,
+                latest,
             )
             return False
 
@@ -100,15 +100,19 @@ class DocumentApplier:
         return True
 
     async def remove(self, job: jobs.RemoveJob) -> bool:
-        """Idempotent: removing again, or a version not indexed, changes nothing."""
-        indexed = await self._writer.indexed_version(job.document_id)
+        """Idempotent: removing again, or an older version, changes nothing.
 
-        if indexed != job.version_id:
+        A version not yet indexed is still recorded, so its apply arriving
+        later is refused.
+        """
+        latest = await self._writer.latest_version(job.document_id)
+
+        if latest is not None and await self._is_superseded(job, latest):
             logger.info(
-                "Nothing to remove for %s version %s: %s is indexed",
+                "Nothing to remove for %s version %s: %s was seen",
                 job.document_id,
                 job.version_id,
-                indexed or "no version",
+                latest,
             )
             return False
 
@@ -117,12 +121,19 @@ class DocumentApplier:
         logger.info("Removed %s version %s", job.document_id, job.version_id)
         return True
 
+    async def _is_superseded(
+        self,
+        job: jobs.ApplyJob | jobs.RemoveJob,
+        latest: ids.VersionId,
+    ) -> bool:
+        """Older than the latest, or the latest itself with its content gone."""
+        if ids.is_older(job.version_id, latest):
+            return True
 
-def _is_older(version_id: ids.VersionId, indexed: ids.VersionId) -> bool:
-    """Only UUIDv7s sort by when they were minted; other ids are never older."""
-    return version_id.version == indexed.version == _TIME_ORDERED and (
-        version_id < indexed
-    )
+        return (
+            job.version_id == latest
+            and await self._writer.indexed_version(job.document_id) != latest
+        )
 
 
 def _is_jobs(staged: chunk_sets.ChunkSet, job: jobs.ApplyJob) -> bool:

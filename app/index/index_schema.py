@@ -13,7 +13,7 @@ import dataclasses
 import enum
 from collections.abc import Mapping, Sequence
 
-from app.records import models
+from app.records import ids, models
 
 SCHEMA_VERSION = 1
 
@@ -35,10 +35,16 @@ class FieldKind(enum.StrEnum):
 
 
 class EntryKind(enum.StrEnum):
-    """A section's chunk, or the one title entry per document."""
+    """A section's chunk, the one title entry per document, or its marker.
+
+    The marker records the newest version applied or removed for the document,
+    whether or not any content remains. It is never a search result, so every
+    search must leave `MARKER` entries out.
+    """
 
     SECTION = "section"
     TITLE = "title"
+    MARKER = "marker"
 
 
 _SEARCHABLE = frozenset({FieldKind.TEXT, FieldKind.TEXT_EXACT})
@@ -144,6 +150,20 @@ def to_index_document(
 def to_title_document(header: models.DocumentHeader) -> dict[str, IndexValue]:
     """The document's one title entry, for title search."""
     return _document_fields(header, EntryKind.TITLE) | {TITLE_NGRAM: header.title}
+
+
+def to_marker_document(
+    document_id: ids.DocumentId,
+    version_id: ids.VersionId,
+) -> dict[str, IndexValue]:
+    """The document's one marker entry: the newest version it has seen."""
+    empty: dict[str, IndexValue] = dict.fromkeys(field.name for field in CHUNK_INDEX)
+
+    return empty | {
+        KIND: EntryKind.MARKER.value,
+        DOCUMENT_ID: str(document_id),
+        VERSION_ID: str(version_id),
+    }
 
 
 def _document_fields(

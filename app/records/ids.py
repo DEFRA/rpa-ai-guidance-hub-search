@@ -41,6 +41,14 @@ _NUMBERED_HEADING = re.compile(
 )
 
 
+_TIME_ORDERED = 7
+
+
+def is_older(version_id: VersionId, than: VersionId) -> bool:
+    """Only UUIDv7s sort by when they were minted; other ids are never older."""
+    return version_id.version == than.version == _TIME_ORDERED and version_id < than
+
+
 def split_section_number(rendered_heading: str) -> tuple[str | None, str]:
     """`"4.2.1 Evidence"` -> `("4.2.1", "Evidence")`; `"Annex A"` -> `(None, "Annex A")`.
 

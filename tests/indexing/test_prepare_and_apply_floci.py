@@ -93,7 +93,7 @@ class TestIndexingTheFixtureGuide:
         assert len(chunk_sets.loads(_staged(client, bucket)).chunks) == len(
             golden_chunks,
         )
-        assert _entry_count(tmp_path) == len(golden_chunks) + 1
+        assert _entry_count(tmp_path) == len(golden_chunks) + 2
 
     async def test_re_running_changes_nothing(self, run, tmp_path):
         client, bucket, index = run
