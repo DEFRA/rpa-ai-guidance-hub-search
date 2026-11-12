@@ -37,12 +37,15 @@ def _entries(directory, field=None, value=None):
     index = tantivy.Index.open(str(directory))
     tantivy_schema.register_tokenizers(index)
     searcher = index.searcher()
+
     query = (
         tantivy.Query.all_query()
         if field is None
         else tantivy.Query.term_query(index.schema, field, value)
     )
+
     hits = searcher.search(query, 1000).hits
+
     return sorted(
         (searcher.doc(address).to_dict() for _, address in hits),
         key=lambda doc: (doc.get("kind"), doc.get("ordinal", [0])),
@@ -64,6 +67,7 @@ class TestReplacingADocument:
         await chunk_index.replace_document(header, chunks)
 
         entries = _entries(directory)
+
         assert _values(entries, index_schema.KIND) == [
             "section",
             "section",
@@ -77,6 +81,7 @@ class TestReplacingADocument:
 
     async def test_stores_what_a_hit_needs(self, chunk_index, directory):
         header, chunks = CLAIMS
+
         await chunk_index.replace_document(header, chunks)
 
         entry = _entries(directory, index_schema.CHUNK_ID, chunks[2].chunk_id)[0]
@@ -125,6 +130,7 @@ class TestReplacingADocument:
         directory,
     ):
         await chunk_index.replace_document(*CLAIMS)
+
         newer = fixtures.document(
             [Section("1 Overview", 1, ("Rewritten.",))],
             fixtures.header(version_id=NEXT_VERSION_ID),
@@ -141,6 +147,7 @@ class TestReplacingADocument:
             [Section("1 Woodland", 1)],
             fixtures.header(document_id=OTHER_DOCUMENT_ID, title="Woodland Guidance"),
         )
+
         await chunk_index.replace_document(*other)
 
         await chunk_index.replace_document(*CLAIMS)
@@ -152,6 +159,7 @@ class TestReplacingADocument:
 
     async def test_stores_topics_and_meta(self, chunk_index, directory):
         header, chunks = CLAIMS
+
         tagged = dataclasses.replace(
             chunks[0],
             topics=("claims", "livestock"),
@@ -161,6 +169,7 @@ class TestReplacingADocument:
         await chunk_index.replace_document(header, [tagged])
 
         entry = _entries(directory, index_schema.CHUNK_ID, tagged.chunk_id)[0]
+
         assert entry["meta"] == [{"source_page": 12}]
         assert [
             _entries(directory, index_schema.TOPICS, tantivy.Facet.from_string(topic))

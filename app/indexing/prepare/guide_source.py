@@ -22,4 +22,5 @@ class GuideSource:
     async def read(self, job: jobs.IndexJob) -> sources.SourceDocument:
         markdown = await self._content_source.read(job.content_url)
         section_ids = await self._section_id_source.read_section_ids(job.content_url)
+
         return await asyncio.to_thread(self._parser.parse, job, markdown, section_ids)

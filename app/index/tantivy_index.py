@@ -28,6 +28,7 @@ class TantivyChunkIndex:
             if tantivy.Index.exists(path)
             else tantivy.Index(tantivy_schema.build_schema(), path=path)
         )
+
         tantivy_schema.register_tokenizers(self._index)
 
     async def replace_document(

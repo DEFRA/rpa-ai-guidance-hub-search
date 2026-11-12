@@ -45,6 +45,7 @@ class S3SectionStore:
         sections: Sequence[models.SectionRecord],
     ) -> None:
         body = jsonl.dumps(header, sections).encode()
+
         await asyncio.to_thread(
             self._client.put_object,
             Bucket=self._bucket,

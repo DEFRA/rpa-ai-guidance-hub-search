@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Index one document version from the command line.
 
+For local development only: it helps you exercise indexing against local
+dependencies (floci, a local index directory). It is not how documents are
+indexed in CDP.
+
     uv run task index-document --source-type guide --index-dir DIR --document-id G --version-id V \
         --status published --content-url s3://<bucket>/<G>/<V>/content.md
 
@@ -26,6 +30,7 @@ from app.records import ids, models
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parser().parse_args(argv)
+
     job = jobs.IndexJob(
         source_type=args.source_type,
         document_id=ids.DocumentId(args.document_id),
@@ -67,6 +72,7 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
     )
     parser.add_argument("--content-url", required=True)
+
     return parser
 
 

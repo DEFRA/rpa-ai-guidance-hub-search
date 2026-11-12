@@ -22,6 +22,7 @@ def bucket(moto_s3):
         Key=guides.content_key(),
         Body="# Title\n\n## 1 Ünïcode\n".encode(),
     )
+
     return moto_s3
 
 
@@ -62,15 +63,21 @@ class TestS3ContentSource:
     async def test_refuses_a_sections_file_that_is_not_a_map(self, bucket, body):
         bucket.put_object(Bucket=guides.BUCKET, Key=SECTIONS_KEY, Body=body)
 
+        source = guide_content.S3ContentSource(bucket)
+
         with pytest.raises(ValueError, match="sections.json"):
-            await guide_content.S3ContentSource(bucket).read_section_ids(URL)
+            await source.read_section_ids(URL)
 
     async def test_raises_when_the_content_is_missing(self, bucket):
         missing = URL.replace("content.md", "other.md")
 
+        source = guide_content.S3ContentSource(bucket)
+
         with pytest.raises(bucket.exceptions.NoSuchKey):
-            await guide_content.S3ContentSource(bucket).read(missing)
+            await source.read(missing)
 
     async def test_raises_other_errors_reading_section_ids(self, moto_s3):
+        source = guide_content.S3ContentSource(moto_s3)
+
         with pytest.raises(moto_s3.exceptions.NoSuchBucket):
-            await guide_content.S3ContentSource(moto_s3).read_section_ids(URL)
+            await source.read_section_ids(URL)

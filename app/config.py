@@ -118,7 +118,7 @@ class AppConfig(pydantic_settings.BaseSettings):
     mongo_database: str = "rpa-ai-guidance-hub-search"
     mongo_truststore: str = "TRUSTSTORE_CDP_ROOT_CA"
     floci_endpoint_url: str | None = None
-    search_index_s3_bucket: str = "rpa-ai-guidance-hub-search-index"
+    search_store_s3_bucket: str = "rpa-ai-guidance-hub-search-store"
     aws_region: str = pydantic.Field(
         default="eu-west-2", description="AWS region for Bedrock and other services"
     )

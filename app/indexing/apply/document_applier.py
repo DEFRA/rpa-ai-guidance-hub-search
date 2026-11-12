@@ -13,7 +13,7 @@ from app import config as app_config
 from app.common import s3
 from app.index import chunk_index, index_schema, tantivy_index
 from app.indexing import jobs
-from app.records import chunk_set_store
+from app.records import chunk_set_store, chunk_sets
 
 logger = logging.getLogger(__name__)
 
@@ -53,16 +53,12 @@ class DocumentApplier:
 
         header = staged.header
 
-        if (header.document_id, header.version_id, header.status, staged.strategy) != (
-            job.document_id,
-            job.version_id,
-            job.status,
-            job.strategy,
-        ):
+        if not _is_jobs(staged, job):
             msg = f"the chunk set at {job.chunk_set_key} is not the job's"
             raise ChunkSetMismatchError(msg)
 
         await self._writer.replace_document(header, staged.chunks)
+
         logger.info(
             "Applied %s version %s (%s): %d %s chunks",
             job.document_id,
@@ -73,13 +69,24 @@ class DocumentApplier:
         )
 
 
+def _is_jobs(staged: chunk_sets.ChunkSet, job: jobs.ApplyJob) -> bool:
+    header = staged.header
+
+    return (header.document_id, header.version_id, header.status, staged.strategy) == (
+        job.document_id,
+        job.version_id,
+        job.status,
+        job.strategy,
+    )
+
+
 def from_config(index_dir: pathlib.Path) -> DocumentApplier:
     config = app_config.get_config()
 
     return DocumentApplier(
         chunk_sets=chunk_set_store.S3ChunkSetStore(
             s3.get_s3_client(),
-            config.search_index_s3_bucket,
+            config.search_store_s3_bucket,
         ),
         writer=tantivy_index.TantivyChunkIndex(index_dir),
     )

@@ -44,11 +44,13 @@ def _sections(markdown, section_ids=None):
         markdown,
         section_ids,
     )
+
     return document.header, sectioning.build(document)
 
 
 def _chunk(markdown, section_ids=None):
     header, sections = _sections(markdown, section_ids)
+
     return header, packed_chunking.PackedChunking().chunk(sections)
 
 
@@ -269,6 +271,7 @@ class TestSectionIds:
         _, chunks = _chunk(NESTED, given)
 
         found = _by_anchor(chunks)
+
         assert found["1-overview"].section_id == given["1-overview"]
         assert found["11-eligibility"].parent_section_id == given["1-overview"]
 
@@ -287,6 +290,7 @@ class TestSectionIds:
         _, chunks = _chunk(NESTED, {})
 
         _, unmapped = _chunk(NESTED)
+
         assert [chunk.section_id for chunk in chunks] == [
             chunk.section_id for chunk in unmapped
         ]

@@ -5,6 +5,7 @@ import uuid
 
 import pytest
 
+from app import config as app_config
 from app.index import index_schema
 from app.indexing.prepare import (
     document_preparer,
@@ -13,7 +14,7 @@ from app.indexing.prepare import (
     packed_chunking,
     sources,
 )
-from app.records import chunk_sets, ids, models
+from app.records import chunk_sets, ids, jsonl, models
 from tests.fakes import chunk_set_store as fake_chunk_set_store
 from tests.fakes import guide_content as fake_guide_content
 from tests.fakes import section_store as fake_section_store
@@ -73,6 +74,7 @@ class TestPrepare:
         await preparer.prepare(guides.job())
 
         header, stored = sections.files[guides.DOCUMENT_ID, guides.VERSION_ID]
+
         assert (header.title, header.url) == (
             "Claims Guidance",
             f"/guides/{guides.DOCUMENT_ID}",
@@ -85,6 +87,7 @@ class TestPrepare:
         apply_job = await preparer.prepare(job)
 
         chunk_set = staged.sets[apply_job.chunk_set_key]
+
         assert [chunk.plain_text for chunk in chunk_set.chunks] == [
             "Hold a holding number.",
         ]
@@ -123,6 +126,7 @@ class TestPrepare:
         await preparer.prepare(guides.job())
 
         _, stored = sections.files[guides.DOCUMENT_ID, guides.VERSION_ID]
+
         assert stored[0].section_id == section
 
     async def test_stores_nothing_for_a_malformed_guide(
@@ -154,6 +158,7 @@ class MintingReader:
         version_id = ids.VersionId(
             ids.minted_id(self.NAMESPACE, str(job.document_id), "content-hash"),
         )
+
         return sources.SourceDocument(
             header=fixtures.header(document_id=job.document_id, version_id=version_id),
             sections=[
@@ -185,6 +190,7 @@ class TestASourceThatMintsVersionIds:
             str(job.document_id),
             "content-hash",
         )
+
         assert apply_job.version_id == minted
         assert staged.sets[apply_job.chunk_set_key].header.version_id == minted
         assert (job.document_id, minted) in sections.files
@@ -196,14 +202,25 @@ class TestTheStrategy:
 
 
 class TestFromConfig:
-    def test_wires_the_real_dependencies(self, mocker):
-        client = mocker.sentinel.client
-        mocker.patch("app.common.s3.get_s3_client", return_value=client)
+    async def test_prepares_through_the_configured_bucket(self, mocker, moto_s3):
+        mocker.patch("app.common.s3.get_s3_client", return_value=moto_s3)
+        bucket = app_config.get_config().search_store_s3_bucket
+        for name in (guides.BUCKET, bucket):
+            moto_s3.create_bucket(
+                Bucket=name,
+                CreateBucketConfiguration={"LocationConstraint": "eu-west-2"},
+            )
+        moto_s3.put_object(
+            Bucket=guides.BUCKET, Key=guides.content_key(), Body=MARKDOWN
+        )
 
-        preparer = document_preparer.from_config()
+        apply_job = await document_preparer.from_config().prepare(guides.job())
 
-        assert preparer._sections._bucket == "rpa-ai-guidance-hub-search-index"
-        assert preparer._chunk_sets._bucket == "rpa-ai-guidance-hub-search-index"
-        reader = preparer._readers[models.SourceType.GUIDE]
-        assert reader._content_source._client is client
-        assert preparer._strategy.name == "packed-800"
+        stored = {
+            item["Key"] for item in moto_s3.list_objects_v2(Bucket=bucket)["Contents"]
+        }
+        assert stored == {
+            apply_job.chunk_set_key,
+            jsonl.key(guides.DOCUMENT_ID, guides.VERSION_ID),
+        }
+        assert apply_job.strategy == index_schema.CHUNK_STRATEGY

@@ -82,6 +82,7 @@ class ChunkIndexContract:
 
     async def test_returns_what_a_hit_needs_to_be_shown_and_linked(self, chunk_index):
         header, chunks = CLAIMS
+
         await chunk_index.replace_document(header, chunks)
 
         (hit,) = (await chunk_index.search(_query("hedgerows"))).hits
@@ -123,6 +124,7 @@ class ChunkIndexContract:
 
         assert await _found(chunk_index, _query("holding")) == []
         (hit,) = (await chunk_index.search(_query("orchards"))).hits
+
         assert hit.version_id == NEXT_VERSION_ID
 
     async def test_replacing_with_the_same_chunks_changes_nothing(self, chunk_index):
@@ -135,6 +137,7 @@ class ChunkIndexContract:
 
     async def test_replacing_with_no_chunks_removes_the_document(self, chunk_index):
         header, _ = CLAIMS
+
         await chunk_index.replace_document(*CLAIMS)
 
         await chunk_index.replace_document(header, [])
@@ -151,6 +154,7 @@ class ChunkIndexContract:
         assert await _found(chunk_index, _query("holding")) == []
         assert await _found(chunk_index, _query("woodland")) == [("Woodland",)]
         titles = await chunk_index.search_titles(_titles("Claims Guidance"))
+
         assert CLAIMS[0].document_id not in {hit.document_id for hit in titles}
 
     async def test_removing_an_absent_document_is_fine(self, chunk_index):
@@ -167,6 +171,7 @@ class ChunkIndexContract:
 
     async def test_pages_by_limit_and_offset_and_counts_every_match(self, chunk_index):
         header, chunks = CLAIMS
+
         await chunk_index.replace_document(
             header,
             [dataclasses.replace(chunk, plain_text="shared word") for chunk in chunks],
@@ -206,6 +211,7 @@ class ChunkIndexContract:
         header, chunks = fixtures.document(
             [Section("1 Overview", 1, ("One hedgerow.", "A hedgerow and a hedgerow."))],
         )
+
         await chunk_index.replace_document(header, chunks)
 
         (hit,) = (await chunk_index.search(_query("hedgerow"))).hits
@@ -219,6 +225,7 @@ class ChunkIndexContract:
                 Section("2 Hedgerows", 1, ("Rules for boundaries.",)),
             ],
         )
+
         await chunk_index.replace_document(header, chunks)
 
         assert await _found(chunk_index, _query("hedgerows")) == [
@@ -371,7 +378,9 @@ class ChunkIndexContract:
         await chunk_index.replace_document(*DRAFT)
 
         assert await chunk_index.search_titles(_titles("Woodland", PUBLISHED)) == []
+
         (hit,) = await chunk_index.search_titles(_titles("Woodland Guidance"))
+
         assert (hit.document_id, hit.version_id, hit.title, hit.status) == (
             OTHER_DOCUMENT_ID,
             OTHER_VERSION_ID,

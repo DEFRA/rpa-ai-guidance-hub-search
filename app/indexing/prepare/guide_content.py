@@ -52,6 +52,7 @@ class S3ContentSource:
 
     async def read(self, content_url: str) -> str:
         bucket, key = parse_s3_url(content_url)
+
         return await asyncio.to_thread(self._get, bucket, key)
 
     async def read_section_ids(
@@ -73,6 +74,7 @@ class S3ContentSource:
     def _get(self, bucket: str, key: str) -> str:
         response = self._client.get_object(Bucket=bucket, Key=key)
         body: bytes = response["Body"].read()
+
         return body.decode("utf-8")
 
 

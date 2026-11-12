@@ -41,6 +41,7 @@ class S3ChunkSetStore:
             Body=chunk_sets.dumps(chunk_set).encode(),
             ContentType=CONTENT_TYPE,
         )
+
         return chunk_set.key
 
     async def get(self, key: str) -> chunk_sets.ChunkSet | None:

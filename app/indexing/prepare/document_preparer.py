@@ -67,8 +67,10 @@ class DocumentPreparer:
         staged = chunk_sets.ChunkSet(
             document.header, self._strategy.name, tuple(chunks)
         )
+
         await self._sections.put(document.header, sections)
         key = await self._chunk_sets.put(staged)
+
         header = document.header
         logger.info(
             "Prepared %s %s version %s (%s): %d sections as %d %s chunks",
@@ -80,6 +82,7 @@ class DocumentPreparer:
             len(chunks),
             self._strategy.name,
         )
+
         return jobs.ApplyJob(
             document_id=header.document_id,
             version_id=header.version_id,
@@ -103,10 +106,10 @@ def from_config() -> DocumentPreparer:
                 guide_markdown.GuideMarkdownParser(),
             ),
         },
-        sections=section_store.S3SectionStore(client, config.search_index_s3_bucket),
+        sections=section_store.S3SectionStore(client, config.search_store_s3_bucket),
         strategy=packed_chunking.PackedChunking(),
         chunk_sets=chunk_set_store.S3ChunkSetStore(
             client,
-            config.search_index_s3_bucket,
+            config.search_store_s3_bucket,
         ),
     )

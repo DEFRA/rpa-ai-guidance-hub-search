@@ -37,5 +37,7 @@ class TestS3ChunkSetStore:
         assert await store.get(CHUNK_SET.key) is None
 
     async def test_raises_other_errors(self, moto_s3):
+        absent = chunk_set_store.S3ChunkSetStore(moto_s3, "absent")
+
         with pytest.raises(moto_s3.exceptions.NoSuchBucket):
-            await chunk_set_store.S3ChunkSetStore(moto_s3, "absent").get(CHUNK_SET.key)
+            await absent.get(CHUNK_SET.key)

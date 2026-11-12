@@ -19,6 +19,7 @@ def _pipeline():
         guides.GUIDE.read_text(),
     )
     sections = sectioning.build(document)
+
     return document.header, sections, packed_chunking.PackedChunking().chunk(sections)
 
 

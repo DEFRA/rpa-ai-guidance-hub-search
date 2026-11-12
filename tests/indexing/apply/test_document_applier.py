@@ -4,11 +4,13 @@ import dataclasses
 import uuid
 
 import pytest
+import tantivy
 
-from app.index import chunk_index, tantivy_index
+from app import config as app_config
+from app.index import chunk_index, index_schema, tantivy_schema
 from app.indexing import jobs
 from app.indexing.apply import document_applier
-from app.records import chunk_sets, ids, models
+from app.records import chunk_set_store, chunk_sets, ids, models
 from tests.fakes import chunk_index as fake_chunk_index
 from tests.fakes import chunk_set_store as fake_chunk_set_store
 from tests.support import chunks as fixtures
@@ -23,6 +25,7 @@ def _staged(text, version_id=fixtures.VERSION_ID):
         [fixtures.Section("1 Overview", 1, (text,))],
         fixtures.header(version_id=version_id),
     )
+
     return chunk_sets.ChunkSet(header, STRATEGY, tuple(chunks))
 
 
@@ -92,8 +95,10 @@ class TestApply:
         await staged.put(chunk_set)
         applier = document_applier.DocumentApplier(staged, index, "packed-400")
 
+        job = _job(chunk_set)
+
         with pytest.raises(document_applier.ChunkSetMismatchError, match="packed-400"):
-            await applier.apply(_job(chunk_set))
+            await applier.apply(job)
 
         assert await _found(index, "holding") == []
 
@@ -113,18 +118,38 @@ class TestApply:
         assert await _found(index, "holding") == []
 
     async def test_raises_when_nothing_is_staged(self, applier):
+        job = _job(_staged("Never staged."))
+
         with pytest.raises(document_applier.ChunkSetNotFoundError):
-            await applier.apply(_job(_staged("Never staged.")))
+            await applier.apply(job)
 
 
 class TestFromConfig:
-    def test_wires_the_real_dependencies(self, mocker, tmp_path):
-        client = mocker.sentinel.client
-        mocker.patch("app.common.s3.get_s3_client", return_value=client)
+    async def test_applies_a_chunk_set_staged_in_the_configured_bucket(
+        self,
+        mocker,
+        moto_s3,
+        tmp_path,
+    ):
+        mocker.patch("app.common.s3.get_s3_client", return_value=moto_s3)
+        bucket = app_config.get_config().search_store_s3_bucket
+        moto_s3.create_bucket(
+            Bucket=bucket,
+            CreateBucketConfiguration={"LocationConstraint": "eu-west-2"},
+        )
+        fixture_set = _staged("Hold a holding number.")
+        chunk_set = dataclasses.replace(
+            fixture_set,
+            strategy=index_schema.CHUNK_STRATEGY,
+            chunks=tuple(
+                dataclasses.replace(chunk, strategy=index_schema.CHUNK_STRATEGY)
+                for chunk in fixture_set.chunks
+            ),
+        )
+        await chunk_set_store.S3ChunkSetStore(moto_s3, bucket).put(chunk_set)
 
-        applier = document_applier.from_config(tmp_path)
+        await document_applier.from_config(tmp_path).apply(_job(chunk_set))
 
-        assert isinstance(applier._writer, tantivy_index.TantivyChunkIndex)
-        assert applier._chunk_sets._client is client
-        assert applier._chunk_sets._bucket == "rpa-ai-guidance-hub-search-index"
-        assert applier._strategy == "packed-800"
+        index = tantivy.Index.open(str(tmp_path))
+        tantivy_schema.register_tokenizers(index)
+        assert index.searcher().num_docs == len(chunk_set.chunks) + 1

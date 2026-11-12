@@ -32,6 +32,7 @@ def stages(mocker):
     preparer.prepare = mocker.AsyncMock(return_value=mocker.sentinel.apply_job)
     applier = mocker.MagicMock()
     applier.apply = mocker.AsyncMock()
+
     mocker.patch(
         "app.indexing.prepare.document_preparer.from_config",
         return_value=preparer,
@@ -40,6 +41,7 @@ def stages(mocker):
         "app.indexing.apply.document_applier.from_config",
         return_value=applier,
     )
+
     return preparer, applier, applier_from_config
 
 
@@ -52,7 +54,9 @@ class TestIndexDocument:
 
         applier_from_config.assert_called_once_with(tmp_path)
         applier.apply.assert_awaited_once_with(mocker.sentinel.apply_job)
+
         (job,), _ = preparer.prepare.await_args
+
         assert (job.document_id, job.version_id, job.status, job.content_url) == (
             guides.DOCUMENT_ID,
             guides.VERSION_ID,

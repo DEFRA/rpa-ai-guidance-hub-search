@@ -42,6 +42,7 @@ def parse(body: str, chef: chonkie.MarkdownChef) -> list[models.Block]:
         cursor = table.end_index
 
     blocks.extend(_text_blocks(text[cursor:]))
+
     return blocks
 
 
@@ -120,6 +121,7 @@ def _list_continues(lines: Sequence[str], blank: int, first: str) -> bool:
 
     item = _LIST_MARKER.match(following)
     opening = _LIST_MARKER.match(first)
+
     return bool(item and opening and item.groups() == opening.groups())
 
 
@@ -186,4 +188,5 @@ def _row_text(row: str) -> str:
         plain_text.strip_inline(cell.replace(_PIPE_PLACEHOLDER, _ESCAPED_PIPE))
         for cell in protected.split("|")
     )
+
     return " | ".join(cell for cell in cells if cell)

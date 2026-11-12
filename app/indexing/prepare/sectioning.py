@@ -138,10 +138,12 @@ def normalise_url(url: str) -> str:
 
     scheme = parts.scheme.lower()
     host = parts.hostname
+
     if ":" in host:
         host = f"[{host}]"
     if port is not None and port != _DEFAULT_PORTS.get(scheme):
         host = f"{host}:{port}"
+
     userinfo, at, _ = parts.netloc.rpartition("@")
     netloc = f"{userinfo}{at}{host}"
 

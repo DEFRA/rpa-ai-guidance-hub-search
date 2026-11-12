@@ -50,8 +50,7 @@ class TestS3SectionStore:
     async def test_raises_other_errors(self, moto_s3):
         header, _ = DOCUMENT
 
+        absent = section_store.S3SectionStore(moto_s3, "absent")
+
         with pytest.raises(moto_s3.exceptions.NoSuchBucket):
-            await section_store.S3SectionStore(moto_s3, "absent").get(
-                header.document_id,
-                header.version_id,
-            )
+            await absent.get(header.document_id, header.version_id)
