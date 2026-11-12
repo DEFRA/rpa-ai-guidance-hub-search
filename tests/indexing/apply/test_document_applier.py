@@ -136,7 +136,7 @@ SECOND_DOCUMENT_ID = ids.DocumentId(uuid.UUID("0199b8a2-0000-7000-8000-00000000f
 
 @pytest.fixture
 def index_builds():
-    return builds.IndexBuilds(
+    return builds.IndexBuildService(
         fake_builds.InMemoryBuildStore(),
         fake_builds.InMemoryActiveBuild(),
     )
@@ -212,9 +212,11 @@ class TestPublish:
         index_builds,
         applier_for,
     ):
+        job = _job(_staged("Never staged."))
+
         with pytest.raises(document_applier.ChunkSetNotFoundError):
             await document_applier.publish(
-                _job(_staged("Never staged.")),
+                job,
                 index_builds,
                 applier_for,
             )
@@ -225,7 +227,7 @@ class TestPublish:
         database = mocker.sentinel.database
         mocker.patch("app.common.mongo.get_mongo_client", mocker.AsyncMock())
         mocker.patch("app.common.mongo.get_db", mocker.AsyncMock(return_value=database))
-        from_config = mocker.patch("app.index.builds.from_config")
+        from_config = mocker.patch("app.index.builds.get_index_build_service")
         publish = mocker.patch(
             "app.indexing.apply.document_applier.publish",
             mocker.AsyncMock(return_value="build"),

@@ -15,7 +15,7 @@ def test_lifespan(mocker):
     )
     database = mocker.MagicMock()
     mocker.patch("app.common.mongo.get_db", mocker.AsyncMock(return_value=database))
-    index_builds = mocker.patch("app.index.builds.from_config")
+    index_builds = mocker.patch("app.index.builds.get_index_build_service")
     load = mocker.patch("app.index.active_index.load", mocker.AsyncMock())
 
     with fastapi.testclient.TestClient(app.entrypoints.fastapi.app):

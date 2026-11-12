@@ -90,7 +90,7 @@ def _is_jobs(staged: chunk_sets.ChunkSet, job: jobs.ApplyJob) -> bool:
 
 async def publish(
     job: jobs.ApplyJob,
-    index_builds: builds.IndexBuilds,
+    index_builds: builds.IndexBuildService,
     applier_for: Callable[[pathlib.Path], DocumentApplier],
 ) -> builds.BuildId:
     """Applies the job to the active build and publishes the result as active.
@@ -106,7 +106,7 @@ async def publish(
 
 async def publish_from_config(job: jobs.ApplyJob) -> builds.BuildId:
     database = await mongo.get_db(await mongo.get_mongo_client())
-    return await publish(job, builds.from_config(database), from_config)
+    return await publish(job, builds.get_index_build_service(database), from_config)
 
 
 def from_config(index_dir: pathlib.Path) -> DocumentApplier:

@@ -74,8 +74,10 @@ class TestIndexDocument:
     def test_applies_nothing_when_preparing_fails(self, preparer, publish):
         preparer.prepare.side_effect = RuntimeError("boom")
 
+        args = _args()
+
         with pytest.raises(RuntimeError, match="boom"):
-            index_document.main(_args())
+            index_document.main(args)
 
         publish.assert_not_awaited()
 
@@ -87,8 +89,10 @@ class TestIndexDocument:
     ):
         publish.side_effect = RuntimeError("boom")
 
+        args = _args()
+
         with pytest.raises(RuntimeError, match="boom"):
-            index_document.main(_args())
+            index_document.main(args)
 
         mongo_client.close.assert_awaited_once()
 

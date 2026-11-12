@@ -38,10 +38,10 @@ def active():
 
 @pytest.fixture
 def index_builds(store, active):
-    return builds.IndexBuilds(store, active)
+    return builds.IndexBuildService(store, active)
 
 
-class TestIndexBuilds:
+class TestIndexBuildService:
     async def test_loads_nothing_into_an_empty_directory_before_any_build(
         self,
         index_builds,
@@ -164,6 +164,31 @@ class TestS3BuildStore:
 
         assert {key.split("/")[2] for key in _keys(moto_s3, BUCKET)} == {kept}
 
+    async def test_removes_what_was_uploaded_when_a_transfer_fails(
+        self,
+        s3_store,
+        moto_s3,
+        tmp_path,
+        mocker,
+    ):
+        directory = await _written_index(tmp_path / "index")
+        real_upload = moto_s3.upload_file
+        calls = []
+
+        def flaky_upload(filename, bucket, key):
+            calls.append(key)
+            if len(calls) == 1:
+                msg = "boom"
+                raise RuntimeError(msg)
+            real_upload(filename, bucket, key)
+
+        mocker.patch.object(moto_s3, "upload_file", side_effect=flaky_upload)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await s3_store.upload(directory)
+
+        assert _keys(moto_s3, BUCKET) == []
+
     async def test_deleting_an_absent_build_is_fine(self, s3_store):
         await s3_store.delete(builds.BuildId("absent"))
 
@@ -248,7 +273,7 @@ class TestFromConfig:
     def test_wires_s3_and_mongo(self, mocker):
         mocker.patch("app.common.s3.get_s3_client", return_value=mocker.sentinel.s3)
 
-        built = builds.from_config(mocker.MagicMock())
+        built = builds.get_index_build_service(mocker.MagicMock())
 
         assert built._store._client is mocker.sentinel.s3
         assert built._store._bucket == "rpa-ai-guidance-hub-search-store"
@@ -256,7 +281,7 @@ class TestFromConfig:
     def test_keys_builds_by_the_index_schema_version(self, mocker):
         mocker.patch("app.common.s3.get_s3_client")
 
-        built = builds.from_config(mocker.MagicMock())
+        built = builds.get_index_build_service(mocker.MagicMock())
 
         assert built._store._schema_version == index_schema.SCHEMA_VERSION
         assert built._active._state_id == f"chunks-v{index_schema.SCHEMA_VERSION}"

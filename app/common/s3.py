@@ -7,9 +7,8 @@ keeps `get_s3_client` overridable in a test the way `get_mongo_client` already i
 `None` locally falls through to boto3's normal region/credential resolution, which
 is what talking to real AWS in CDP needs.
 
-Typed `Any`, not a boto3 stub type: boto3 clients are generated dynamically at
-runtime and carry no such static type to reference, which is also why `boto3.*` is
-blanket-`ignore_missing_imports`d in `pyproject.toml`.
+Typed with `types-boto3`'s `S3Client` (a dev-only stub package, so imported only
+for type checking).
 
 **Each S3 call is capped, and tried once more.** A call is given 2.5 seconds to
 connect and 2.5 to answer - half the 5 seconds the front end waits for a whole call
@@ -25,7 +24,7 @@ once.
 """
 
 from logging import getLogger
-from typing import Any
+from typing import TYPE_CHECKING
 
 import boto3
 from botocore import exceptions as botocore_exceptions
@@ -33,16 +32,19 @@ from botocore.config import Config
 
 from app import config as app_config
 
+if TYPE_CHECKING:
+    from types_boto3_s3 import S3Client
+
 logger = getLogger(__name__)
 
 TIMEOUT_SECONDS = 2.5
 ATTEMPTS = 2
 _MISSING = frozenset({"NoSuchKey", "404"})
 
-client: Any = None
+client: S3Client | None = None
 
 
-def get_s3_client() -> Any:
+def get_s3_client() -> S3Client:
     global client
 
     if client is None:

@@ -9,12 +9,15 @@ import asyncio
 import json
 import urllib.parse
 from collections.abc import Mapping
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from botocore import exceptions as botocore_exceptions
 
 from app.common import s3
 from app.records import ids
+
+if TYPE_CHECKING:
+    from types_boto3_s3 import S3Client
 
 SECTIONS_FILE = "sections.json"
 
@@ -47,7 +50,7 @@ def parse_s3_url(url: str) -> tuple[str, str]:
 class S3ContentSource:
     """Reads content and section IDs with the API's cross-service read grant."""
 
-    def __init__(self, client: Any) -> None:
+    def __init__(self, client: S3Client) -> None:
         self._client = client
 
     async def read(self, content_url: str) -> str:

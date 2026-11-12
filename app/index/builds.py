@@ -22,14 +22,18 @@ import datetime as dt
 import logging
 import pathlib
 import uuid
-from typing import Any, NewType, Protocol
+from typing import TYPE_CHECKING, NewType, Protocol
 
+import fastapi
 import pymongo
 from pymongo import errors as pymongo_errors
 
 from app import config as app_config
-from app.common import s3
+from app.common import mongo, s3
 from app.index import index_schema
+
+if TYPE_CHECKING:
+    from types_boto3_s3 import S3Client
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +66,7 @@ class ActiveBuild(Protocol):
         ...
 
 
-class IndexBuilds:
+class IndexBuildService:
     """Loads the active build into a directory, and publishes one as active."""
 
     def __init__(self, store: BuildStore, active: ActiveBuild) -> None:
@@ -115,7 +119,7 @@ class IndexBuilds:
 class S3BuildStore:
     """Builds under `index/v{schemaVersion}/{buildId}/` in the search-store bucket."""
 
-    def __init__(self, client: Any, bucket: str, schema_version: int) -> None:
+    def __init__(self, client: S3Client, bucket: str, schema_version: int) -> None:
         self._client = client
         self._bucket = bucket
         self._schema_version = schema_version
@@ -128,7 +132,7 @@ class S3BuildStore:
             if path.is_file() and not path.name.endswith(_LOCK_SUFFIX)
         ]
 
-        await asyncio.gather(
+        results = await asyncio.gather(
             *(
                 asyncio.to_thread(
                     self._client.upload_file,
@@ -138,7 +142,15 @@ class S3BuildStore:
                 )
                 for path in files
             ),
+            return_exceptions=True,
         )
+        errors = [result for result in results if isinstance(result, BaseException)]
+
+        if errors:
+            # Every transfer has finished, so nothing can re-create the prefix.
+            await self.delete(build_id)
+            raise errors[0]
+
         return build_id
 
     async def download(self, build_id: BuildId, directory: pathlib.Path) -> None:
@@ -222,11 +234,16 @@ class MongoActiveBuild:
         return bool(result.matched_count)
 
 
-def from_config(database: pymongo.asynchronous.database.AsyncDatabase) -> IndexBuilds:
+def get_index_build_service(
+    database: pymongo.asynchronous.database.AsyncDatabase = fastapi.Depends(
+        mongo.get_db,
+    ),
+) -> IndexBuildService:
+    """FastAPI dependency; also called directly with a database outside requests."""
     config = app_config.get_config()
     version = index_schema.SCHEMA_VERSION
 
-    return IndexBuilds(
+    return IndexBuildService(
         store=S3BuildStore(
             s3.get_s3_client(),
             config.search_store_s3_bucket,

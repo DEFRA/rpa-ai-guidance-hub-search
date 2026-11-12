@@ -21,7 +21,7 @@ _build_id: builds.BuildId | None = None
 
 async def load(
     directory: pathlib.Path,
-    index_builds: builds.IndexBuilds,
+    index_builds: builds.IndexBuildService,
 ) -> builds.BuildId | None:
     global _index, _build_id
 
@@ -36,10 +36,9 @@ async def load(
     _index = tantivy_index.TantivyChunkIndex(target)
     _build_id = build_id
     logger.info(
-        "Serving index schema v%d build %s from %s",
+        "Serving index schema v%d build %s",
         index_schema.SCHEMA_VERSION,
         build_id or "(none)",
-        target,
     )
     return build_id
 

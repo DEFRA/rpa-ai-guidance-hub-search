@@ -16,7 +16,7 @@ def unloaded(monkeypatch):
 
 
 async def _published(tmp_path):
-    index_builds = builds.IndexBuilds(
+    index_builds = builds.IndexBuildService(
         fake_builds.InMemoryBuildStore(),
         fake_builds.InMemoryActiveBuild(),
     )
@@ -38,7 +38,7 @@ class TestLoad:
         )
 
     async def test_serves_an_empty_index_before_any_build(self, tmp_path):
-        index_builds = builds.IndexBuilds(
+        index_builds = builds.IndexBuildService(
             fake_builds.InMemoryBuildStore(),
             fake_builds.InMemoryActiveBuild(),
         )

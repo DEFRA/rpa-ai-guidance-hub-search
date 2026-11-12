@@ -22,7 +22,7 @@ async def lifespan(_: fastapi.FastAPI) -> AsyncGenerator[None]:
     database = await mongo.get_db(client)
     await active_index.load(
         app_config.get_config().search_index_directory,
-        builds.from_config(database),
+        builds.get_index_build_service(database),
     )
 
     yield

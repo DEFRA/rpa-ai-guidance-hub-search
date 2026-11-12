@@ -6,12 +6,15 @@ version at the same status again overwrites the same object.
 """
 
 import asyncio
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from botocore import exceptions as botocore_exceptions
 
 from app.common import s3
 from app.records import chunk_sets
+
+if TYPE_CHECKING:
+    from types_boto3_s3 import S3Client
 
 CONTENT_TYPE = "application/x-ndjson"
 
@@ -29,7 +32,7 @@ class ChunkSetStore(Protocol):
 class S3ChunkSetStore:
     """`staged/{strategy}/{documentId}/{versionId}/{status}.jsonl` in the search-store bucket."""
 
-    def __init__(self, client: Any, bucket: str) -> None:
+    def __init__(self, client: S3Client, bucket: str) -> None:
         self._client = client
         self._bucket = bucket
 
