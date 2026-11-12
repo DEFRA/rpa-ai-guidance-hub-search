@@ -236,6 +236,7 @@ class TestIdsAcrossVersionsOfADocument:
         assert after[("Claims", "Who can claim", "Concurrent claims")] not in (
             before.values()
         )
+
         for unchanged in [("Overview",), ("Claims",), ("Annex A", "Payment windows")]:
             assert after[unchanged] == before[unchanged]
 

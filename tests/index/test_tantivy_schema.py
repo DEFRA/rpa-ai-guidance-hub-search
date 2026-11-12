@@ -13,6 +13,7 @@ def index() -> tantivy.Index:
     built = tantivy.Index(tantivy_schema.build_schema())
     tantivy_schema.register_tokenizers(built)
     writer = built.writer()
+
     document = tantivy.Document()
     document.add_text("chunk_id", "c1")
     document.add_text("document_id", "g1")
@@ -28,10 +29,12 @@ def index() -> tantivy.Index:
     document.add_facet("topics", tantivy.Facet.from_string("/claims"))
     document.add_integer("ordinal", 7)
     document.add_json("meta", {"source_page": 12})
+
     writer.add_document(document)
     writer.commit()
     writer.wait_merging_threads()
     built.reload()
+
     return built
 
 

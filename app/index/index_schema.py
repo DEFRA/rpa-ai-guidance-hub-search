@@ -17,6 +17,10 @@ from app.records import models
 
 SCHEMA_VERSION = 1
 
+# The chunking strategy whose chunks this schema version holds. The apply step
+# refuses chunks made by any other, so a strategy change is a schema change.
+CHUNK_STRATEGY = "packed-800"
+
 type IndexValue = str | int | tuple[str, ...] | Mapping[str, models.JsonValue] | None
 
 

@@ -59,6 +59,7 @@ class PackedChunking:
             if block.kind is models.BlockKind.TABLE:
                 if current:
                     parts.append(tuple(current))
+
                 parts.append((block,))
                 current, size = [], 0
                 continue

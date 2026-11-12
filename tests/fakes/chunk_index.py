@@ -54,6 +54,7 @@ class InMemoryChunkIndex:
 
         ranked = sorted(best.values(), key=_rank, reverse=True)
         page = ranked[query.offset : query.offset + query.limit]
+
         return chunk_index.SectionHits(hits=tuple(page), total=len(ranked))
 
     async def search_titles(
@@ -110,6 +111,7 @@ def _match(
     near = heading_weight * _near_matches(text, headings) + body_weight * (
         _near_matches(text, chunk.plain_text)
     )
+
     return _hit(header, chunk, near, exact=False) if near else None
 
 
@@ -150,6 +152,7 @@ def _title_score(query: str, title: str) -> float:
         )
         for word in words
     ]
+
     return sum(scores) / len(scores) if all(scores) else 0
 
 
@@ -165,6 +168,7 @@ def _title_word_score(word: str, candidate: str) -> float:
 
     budget = chunk_index.typo_budget(word)
     near = min(_distance(word, candidate), _distance(word, candidate[: len(word)]))
+
     return _TYPO if near <= budget else 0
 
 

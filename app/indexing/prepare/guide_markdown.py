@@ -148,6 +148,7 @@ def _anchors(sections: Sequence[_Section]) -> list[str]:
         [section.rendered for section in sections if section.rendered is not None],
     )
     anchor_of = iter(headed)
+
     return [
         next(anchor_of) if section.rendered is not None else "" for section in sections
     ]
@@ -193,4 +194,5 @@ def _given_id(
         job.version_id,
         anchor,
     )
+
     return None
