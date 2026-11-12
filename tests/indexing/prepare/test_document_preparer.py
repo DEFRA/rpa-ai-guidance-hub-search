@@ -9,12 +9,13 @@ from app import config as app_config
 from app.index import index_schema
 from app.indexing.prepare import (
     document_preparer,
+    guide_content,
     guide_markdown,
     guide_source,
     packed_chunking,
     sources,
 )
-from app.records import chunk_sets, ids, jsonl, models
+from app.records import chunk_sets, ids, jsonl, models, source_metadata
 from tests.fakes import chunk_set_store as fake_chunk_set_store
 from tests.fakes import guide_content as fake_guide_content
 from tests.fakes import section_store as fake_section_store
@@ -224,3 +225,25 @@ class TestFromConfig:
             jsonl.key(guides.DOCUMENT_ID, guides.VERSION_ID),
         }
         assert apply_job.strategy == index_schema.CHUNK_STRATEGY
+
+    async def test_reads_with_the_readers_it_is_given(self, mocker, moto_s3):
+        mocker.patch("app.common.s3.get_s3_client", return_value=moto_s3)
+        bucket = app_config.get_config().search_store_s3_bucket
+        moto_s3.create_bucket(
+            Bucket=bucket,
+            CreateBucketConfiguration={"LocationConstraint": "eu-west-2"},
+        )
+        inline = guide_content.InlineContent(MARKDOWN)
+        metadata = source_metadata.GuideMetadata(version_number="1.2")
+        reader = guide_source.GuideSource(
+            inline, inline, guide_markdown.GuideMarkdownParser(), metadata
+        )
+
+        preparer = document_preparer.from_config({models.SourceType.GUIDE: reader})
+        await preparer.prepare(guides.job())
+
+        stored = moto_s3.get_object(
+            Bucket=bucket, Key=jsonl.key(guides.DOCUMENT_ID, guides.VERSION_ID)
+        )
+        header, _ = jsonl.loads(stored["Body"].read().decode())
+        assert header.source == metadata

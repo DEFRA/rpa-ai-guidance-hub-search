@@ -71,6 +71,7 @@ typecheck = "uv run mypy ./app ./tests"
 openapi = "uv run python -m scripts.export_openapi"
 openapi-check = "uv run python -m scripts.export_openapi --check"
 index-document = "uv run --env-file .env python -m scripts.index_document"
+send-document = "uv run python -m scripts.send_document"
 test = "uv run task lint && uv run task typecheck && uv run coverage run -m pytest -vv && uv run coverage html && uv run coverage xml"
 
 [tool.pytest.ini_options]

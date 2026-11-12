@@ -143,6 +143,7 @@ class AppConfig(pydantic_settings.BaseSettings):
     http_proxy: pydantic.HttpUrl | None = None
     enable_metrics: bool = False
     ingestion_mode: IngestionMode = IngestionMode.HTTP
+    max_inline_content_bytes: int = pydantic.Field(default=2 * 1024 * 1024, gt=0)
     tracing_header: str = "x-cdp-request-id"
     claude_sonnet_model_config: Annotated[
         BedrockModelConfig, pydantic_settings.NoDecode

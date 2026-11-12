@@ -5,6 +5,7 @@ import json
 import pytest
 
 from app.indexing.prepare import guide_content
+from app.records import ids
 from tests.support import guides
 
 URL = guides.job().content_url
@@ -81,3 +82,18 @@ class TestS3ContentSource:
 
         with pytest.raises(moto_s3.exceptions.NoSuchBucket):
             await source.read_section_ids(URL)
+
+
+class TestInlineContent:
+    async def test_hands_back_what_it_was_sent(self):
+        section_ids = {"1-overview": ids.SectionId("section-1")}
+
+        source = guide_content.InlineContent("# Title\n", section_ids)
+
+        assert await source.read(URL) == "# Title\n"
+        assert await source.read_section_ids(URL) == section_ids
+
+    async def test_has_no_section_ids_unless_sent_some(self):
+        source = guide_content.InlineContent("# Title\n")
+
+        assert await source.read_section_ids(URL) is None
