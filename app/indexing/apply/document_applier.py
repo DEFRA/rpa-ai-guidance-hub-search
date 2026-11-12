@@ -97,7 +97,12 @@ async def publish(
 
     Raises `builds.LostSwapError` if another build became active meanwhile.
     """
-    with tempfile.TemporaryDirectory(prefix="search-index-") as work:
+    # Tantivy can still be touching files as the directory is removed. A failed
+    # cleanup of scratch space must not replace the error that got us here.
+    with tempfile.TemporaryDirectory(
+        prefix="search-index-",
+        ignore_cleanup_errors=True,
+    ) as work:
         directory = pathlib.Path(work)
         base = await index_builds.load(directory)
         await applier_for(directory).apply(job)
