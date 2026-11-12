@@ -46,6 +46,65 @@ class KeywordSearch:
             ),
         )
 
+    async def search_documents(
+        self,
+        request: service.DocumentSearch,
+    ) -> service.DocumentResults:
+        """Groups every matching section by document, then pages the documents.
+
+        A document ranks where its best section does. The index gives hits best
+        first, so grouping in order of first appearance keeps that order.
+        Excerpts are made only for the sections given back.
+        """
+        query_id = _query_id()
+        hits = await self._index.search(
+            chunk_index.ChunkQuery(
+                text=request.text,
+                statuses=routing.statuses_for(request.role),
+                tag=request.tag,
+                # Every match: past `MAX_MATCHES` (at most `MAX_LIMIT`) none
+                # are served anyway.
+                limit=chunk_index.MAX_LIMIT,
+            ),
+        )
+
+        if hits.total > service.MAX_MATCHES:
+            raise service.TooManyMatchesError(query_id, hits.total)
+
+        by_document: dict[uuid.UUID, list[chunk_index.SectionHit]] = {}
+
+        for hit in hits.hits:
+            by_document.setdefault(hit.document_id, []).append(hit)
+
+        documents = list(by_document.values())
+        page = documents[request.offset : request.offset + request.limit]
+        logger.info(
+            "Document search %s found %d sections in %d documents; returned %s",
+            query_id,
+            hits.total,
+            len(documents),
+            [(str(sections[0].document_id), len(sections)) for sections in page],
+        )
+
+        return service.DocumentResults(
+            query_id=query_id,
+            total=len(documents),
+            section_total=hits.total,
+            results=tuple(
+                service.DocumentResult(
+                    sections=tuple(
+                        service.SectionResult(
+                            hit=hit,
+                            excerpt=excerpts.of_hit(request.text, hit),
+                        )
+                        for hit in sections[: request.sections]
+                    ),
+                    section_total=len(sections),
+                )
+                for sections in page
+            ),
+        )
+
     async def search_titles(self, request: service.TitleSearch) -> service.TitleResults:
         query_id = _query_id()
         hits = await self._index.search_titles(

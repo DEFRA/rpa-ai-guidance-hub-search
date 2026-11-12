@@ -233,6 +233,57 @@ uv run pytest
 
 ## Where code goes
 
+### Domains
+
+```text
+prepare:  source reader -> SourceDocument -> sectioning -> SectionRecord (stored)
+                                                               |
+                         chunking strategy -> ChunkSet (staged) -> ApplyJob
+apply:    ApplyJob -> staged ChunkSet -> index build (published)
+
+indexing (write)   search (read)  ->  search/v1 (GET /v1/search)
+        \              /
+     records, index, matching
+```
+
+- **`app/records/`** is the canonical, source-neutral model: a
+  `DocumentHeader` per version (with the `url` a reader views it at, and
+  `source`, the source's own details typed per source type in
+  `source_metadata`: `GuideMetadata` today),
+  `SectionRecord`s (whole sections, kept as blocks, with a section
+  `content_hash`) and the `ChunkRecord`s a strategy derives from them. Sections
+  are stored as `sections/{documentId}/{versionId}.jsonl`, and are what every
+  rebuild starts from. A `ChunkSet` is one strategy's chunks of one version at
+  one status, staged as `staged/{strategy}/{documentId}/{versionId}/{status}.jsonl`
+  for the apply step.
+- **Ids**: every document and version id is a UUID. Guides use the CMS's
+  (always UUIDv7). A source without its own, such as GOV.UK content, mints
+  deterministic UUIDv5s under its own namespace (`ids.minted_id`), so the
+  same content always gets the same ids and sources never collide.
+- **`app/indexing/`** indexes a version in two steps (`stages.py`), so that
+  preparing can later scale out while a single writer applies:
+  - **`prepare/`** turns an `IndexJob` into an `ApplyJob`. A `SourceReader` per
+    source type reads one version into a `SourceDocument` (a guide's
+    `content.md` today, with `guide_cms` modelling the CMS API's guide and
+    its metadata; GOV.UK content items would be another reader with their
+    own Content API models and metadata type), `sectioning`
+    makes the canonical sections, and a named `ChunkingStrategy` (`packed-800`
+    for the keyword index) chunks them. `DocumentPreparer` stores the sections
+    and stages the chunk set. It never touches the index.
+  - **`apply/`** writes an `ApplyJob`'s staged chunk set to the index.
+    `DocumentApplier` refuses chunks from any strategy but
+    `index_schema.CHUNK_STRATEGY`, and `publish` applies a job to the active
+    build and publishes the result. It never reads a source or chunks.
+- **`app/search/`** answers queries from the index. `app/search/v1/` is the HTTP
+  contract; a breaking change is a new `v2/` beside it.
+- **`app/index/`** is the index itself: its fields and `SCHEMA_VERSION`, the
+  `ChunkIndex` protocols, the Tantivy engine, and its builds in S3 and the
+  active build in MongoDB, both keyed by schema version.
+- **`app/matching/`** decides what counts as a match, for the engine and for
+  excerpts alike.
+
+Indexing and search never import each other.
+
 ### Schemas and models
 
 Each layer knows only the one directly below it:
@@ -275,6 +326,7 @@ mypy refuses one where another belongs:
 |:--------------------------------| :----------------------------- |
 | `GET: /docs`                    | Automatic API Swagger docs (the same document is committed as `docs/openapi.json`; regenerate with `uv run task openapi`) |
 | `GET: /health`                  | Health check endpoint          |
+| `GET: /v1/search`               | Word search (`q`, optionally inside one document with `tag`, paged by `limit` and `offset`; `group=document` pages documents instead, each with its best `sections`) or title search (`title`); published documents only for now |
 | `PUT: /documents/{documentId}/versions/{versionId}` | Index a version (202). The body carries exactly one of `contentUrl` (`s3://…/content.md`) or `content` (`markdown`, optional `sectionIds`), plus `status`, `occurredAt`, `versionNumber` and the CMS `metadata`. `status` must be `published` (the index holds one version per document, so anything else is refused with 422), and `metadata.guideTitle` is required: it is the indexed title, never the Markdown's `# ` line. A version older than the one indexed is skipped. `http` mode only. |
 | `DELETE: /documents/{documentId}/versions/{versionId}` | Remove a version at every status (202): from the index if it is the version indexed, and its staged files. `http` mode only. |
 
