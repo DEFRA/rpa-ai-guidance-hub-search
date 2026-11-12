@@ -130,6 +130,178 @@ class TestApply:
         with pytest.raises(document_applier.ChunkSetNotFoundError):
             await applier.apply(job)
 
+    async def test_says_it_changed_the_index(self, applier, staged):
+        chunk_set = _staged("Hold a holding number.")
+        await staged.put(chunk_set)
+
+        assert await applier.apply(_job(chunk_set)) is True
+
+    async def test_skips_a_version_older_than_the_one_indexed(
+        self, applier, staged, index
+    ):
+        old = _staged("Hold a holding number.")
+        new = _staged("Rewritten for orchards.", NEXT_VERSION_ID)
+        await staged.put(old)
+        await staged.put(new)
+        await applier.apply(_job(new))
+
+        assert await applier.apply(_job(old)) is False
+
+        assert await _found(index, "holding") == []
+        assert await _found(index, "orchards") == [NEXT_VERSION_ID]
+
+    async def test_orders_only_time_ordered_ids(self, applier, staged, index):
+        """A UUIDv4 sorts below a v7 by chance, not because it is older."""
+        random_id = ids.VersionId(uuid.UUID("00000000-0000-4000-8000-000000000001"))
+        indexed = _staged("Hold a holding number.")
+        other = _staged("Rewritten for orchards.", random_id)
+        await staged.put(indexed)
+        await staged.put(other)
+        await applier.apply(_job(indexed))
+
+        assert await applier.apply(_job(other)) is True
+
+        assert await _found(index, "orchards") == [random_id]
+
+
+class TestStaleApplies:
+    """A delayed or retried apply can't undo a newer version or a deletion."""
+
+    async def test_refuses_an_older_version_after_the_newer_is_removed(
+        self, applier, staged, index
+    ):
+        old = _staged("Hold a holding number.")
+        new = _staged("Rewritten for orchards.", NEXT_VERSION_ID)
+        await staged.put(old)
+        await staged.put(new)
+        await applier.apply(_job(new))
+        await applier.remove(_remove(NEXT_VERSION_ID))
+
+        assert await applier.apply(_job(old)) is False
+
+        assert await _found(index, "holding") == []
+        assert await _found(index, "orchards") == []
+
+    async def test_refuses_the_removed_version_itself(self, applier, staged, index):
+        chunk_set = _staged("Hold a holding number.")
+        await staged.put(chunk_set)
+        await applier.apply(_job(chunk_set))
+        await applier.remove(_remove())
+
+        assert await applier.apply(_job(chunk_set)) is False
+
+        assert await _found(index, "holding") == []
+
+    async def test_refuses_a_version_removed_before_it_was_applied(
+        self, applier, staged, index
+    ):
+        chunk_set = _staged("Hold a holding number.")
+        await staged.put(chunk_set)
+
+        assert await applier.remove(_remove()) is True
+        assert await applier.apply(_job(chunk_set)) is False
+
+        assert await _found(index, "holding") == []
+
+    async def test_removing_a_pending_version_keeps_the_indexed_one(
+        self, applier, staged, index
+    ):
+        live = _staged("Hold a holding number.")
+        pending = _staged("Rewritten for orchards.", NEXT_VERSION_ID)
+        await staged.put(live)
+        await staged.put(pending)
+        await applier.apply(_job(live))
+
+        assert await applier.remove(_remove(NEXT_VERSION_ID)) is True
+
+        assert await applier.apply(_job(pending)) is False
+        assert await _found(index, "holding") == [fixtures.VERSION_ID]
+        assert await _found(index, "orchards") == []
+
+    async def test_refuses_an_older_version_after_an_empty_newer_one(
+        self, applier, staged, index
+    ):
+        old = _staged("Hold a holding number.")
+        empty = chunk_sets.ChunkSet(
+            fixtures.header(version_id=NEXT_VERSION_ID), STRATEGY, ()
+        )
+        await staged.put(old)
+        await staged.put(empty)
+        await applier.apply(_job(old))
+        await applier.apply(_job(empty))
+
+        assert await applier.apply(_job(old)) is False
+
+        assert await _found(index, "holding") == []
+
+    async def test_a_newer_version_is_applied_after_a_removal(
+        self, applier, staged, index
+    ):
+        old = _staged("Hold a holding number.")
+        new = _staged("Rewritten for orchards.", NEXT_VERSION_ID)
+        await staged.put(old)
+        await staged.put(new)
+        await applier.apply(_job(old))
+        await applier.remove(_remove())
+
+        assert await applier.apply(_job(new)) is True
+
+        assert await _found(index, "orchards") == [NEXT_VERSION_ID]
+
+    async def test_removing_twice_changes_nothing_the_second_time(
+        self, applier, staged
+    ):
+        chunk_set = _staged("Hold a holding number.")
+        await staged.put(chunk_set)
+        await applier.apply(_job(chunk_set))
+        await applier.remove(_remove())
+
+        assert await applier.remove(_remove()) is False
+
+
+def _remove(version_id=fixtures.VERSION_ID):
+    return jobs.RemoveJob(
+        document_id=fixtures.DOCUMENT_ID,
+        version_id=version_id,
+        occurred_at=fixtures.OCCURRED_AT,
+    )
+
+
+class TestRemove:
+    async def test_removes_the_indexed_version(self, applier, staged, index):
+        chunk_set = _staged("Hold a holding number.")
+        await staged.put(chunk_set)
+        await applier.apply(_job(chunk_set))
+
+        assert await applier.remove(_remove()) is True
+
+        assert await _found(index, "holding") == []
+
+    async def test_leaves_another_indexed_version(self, applier, staged, index):
+        chunk_set = _staged("Hold a holding number.")
+        await staged.put(chunk_set)
+        await applier.apply(_job(chunk_set))
+
+        await applier.remove(_remove(NEXT_VERSION_ID))
+
+        assert await _found(index, "holding") == [fixtures.VERSION_ID]
+
+    async def test_records_a_version_of_an_absent_document(self, applier):
+        assert await applier.remove(_remove()) is True
+
+    async def test_changes_nothing_for_an_older_version(self, applier):
+        await applier.remove(_remove(NEXT_VERSION_ID))
+
+        assert await applier.remove(_remove()) is False
+
+    def test_needs_a_timezone(self):
+        with pytest.raises(ValueError, match="timezone-aware"):
+            jobs.RemoveJob(
+                document_id=fixtures.DOCUMENT_ID,
+                version_id=fixtures.VERSION_ID,
+                occurred_at=fixtures.OCCURRED_AT.replace(tzinfo=None),
+            )
+
 
 SECOND_DOCUMENT_ID = ids.DocumentId(uuid.UUID("0199b8a2-0000-7000-8000-00000000f0bb"))
 
@@ -159,7 +331,10 @@ def _documents_in(directory):
     tantivy_schema.register_tokenizers(index)
     searcher = index.searcher()
     hits = searcher.search(tantivy.Query.all_query(), 100).hits
-    return sorted({searcher.doc(address)["document_id"][0] for _, address in hits})
+    docs = [searcher.doc(address) for _, address in hits]
+    return sorted(
+        {doc["document_id"][0] for doc in docs if doc["kind"] != ["marker"]},
+    )
 
 
 async def _stage(staged, text, document_id=fixtures.DOCUMENT_ID):
@@ -223,6 +398,41 @@ class TestPublish:
 
         assert await index_builds.active_build() is None
 
+    async def test_publishes_a_removal(
+        self,
+        index_builds,
+        applier_for,
+        staged,
+        tmp_path,
+    ):
+        first_job = await _stage(staged, "Hold a holding number.")
+        second_job = await _stage(staged, "Licences.", SECOND_DOCUMENT_ID)
+        await document_applier.publish(first_job, index_builds, applier_for)
+        await document_applier.publish(second_job, index_builds, applier_for)
+
+        build_id = await document_applier.publish(_remove(), index_builds, applier_for)
+
+        assert await index_builds.active_build() == build_id
+        await index_builds.load(tmp_path / "check")
+        assert _documents_in(tmp_path / "check") == [str(SECOND_DOCUMENT_ID)]
+
+    async def test_publishes_nothing_when_nothing_changed(
+        self,
+        index_builds,
+        applier_for,
+        staged,
+    ):
+        job = await _stage(staged, "Hold a holding number.")
+        active = await document_applier.publish(job, index_builds, applier_for)
+
+        removed = await document_applier.publish(_remove(), index_builds, applier_for)
+
+        again = await document_applier.publish(_remove(), index_builds, applier_for)
+
+        assert again is None
+        assert await index_builds.active_build() == removed
+        assert removed != active
+
     async def test_publishes_from_config(self, mocker):
         database = mocker.sentinel.database
         mocker.patch("app.common.mongo.get_mongo_client", mocker.AsyncMock())
@@ -272,4 +482,4 @@ class TestFromConfig:
 
         index = tantivy.Index.open(str(tmp_path))
         tantivy_schema.register_tokenizers(index)
-        assert index.searcher().num_docs == len(chunk_set.chunks) + 1
+        assert index.searcher().num_docs == len(chunk_set.chunks) + 2

@@ -2,7 +2,7 @@ import fastapi.testclient
 
 import app.entrypoints.fastapi
 
-client = fastapi.testclient.TestClient(app.entrypoints.fastapi.app)
+client = fastapi.testclient.TestClient(app.entrypoints.fastapi.create_app())
 
 
 class TestHealthProbe:

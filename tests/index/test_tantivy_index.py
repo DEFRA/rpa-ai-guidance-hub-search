@@ -33,7 +33,23 @@ def chunk_index(directory):
 
 
 def _entries(directory, field=None, value=None):
-    """Stored entries, read through a separately opened index."""
+    """Stored content entries, read through a separately opened index."""
+    return [
+        entry
+        for entry in _stored(directory, field, value)
+        if entry.get("kind") != [index_schema.EntryKind.MARKER.value]
+    ]
+
+
+def _markers(directory):
+    return [
+        entry
+        for entry in _stored(directory)
+        if entry.get("kind") == [index_schema.EntryKind.MARKER.value]
+    ]
+
+
+def _stored(directory, field=None, value=None):
     index = tantivy.Index.open(str(directory))
     tantivy_schema.register_tokenizers(index)
     searcher = index.searcher()
@@ -189,6 +205,118 @@ class TestRemovingADocument:
         await chunk_index.remove_document(OTHER_DOCUMENT_ID)
 
         assert _entries(directory) == []
+
+
+class TestRemovingAVersion:
+    async def test_removes_every_entry_when_it_is_the_indexed_version(
+        self, chunk_index, directory
+    ):
+        header, _ = CLAIMS
+        await chunk_index.replace_document(*CLAIMS)
+
+        await chunk_index.remove_version(header.document_id, header.version_id)
+
+        assert _entries(directory) == []
+
+    async def test_leaves_the_document_when_another_version_is_indexed(
+        self, chunk_index, directory
+    ):
+        header, _ = CLAIMS
+        await chunk_index.replace_document(*CLAIMS)
+
+        await chunk_index.remove_version(header.document_id, NEXT_VERSION_ID)
+
+        assert len(_entries(directory)) == 4
+
+    async def test_leaves_other_documents(self, chunk_index, directory):
+        header, _ = CLAIMS
+        other = fixtures.document(
+            [Section("1 Woodland", 1)],
+            fixtures.header(document_id=OTHER_DOCUMENT_ID),
+        )
+        await chunk_index.replace_document(*CLAIMS)
+        await chunk_index.replace_document(*other)
+
+        await chunk_index.remove_version(header.document_id, header.version_id)
+
+        assert _values(_entries(directory), index_schema.DOCUMENT_ID) == [
+            str(OTHER_DOCUMENT_ID),
+            str(OTHER_DOCUMENT_ID),
+        ]
+
+
+class TestLatestVersion:
+    async def test_is_none_for_a_document_never_seen(self, chunk_index):
+        assert await chunk_index.latest_version(OTHER_DOCUMENT_ID) is None
+
+    async def test_survives_removing_the_version(self, chunk_index, directory):
+        header, _ = CLAIMS
+        await chunk_index.replace_document(*CLAIMS)
+
+        await chunk_index.remove_version(header.document_id, header.version_id)
+
+        assert await chunk_index.indexed_version(header.document_id) is None
+        assert await chunk_index.latest_version(header.document_id) == (
+            header.version_id
+        )
+        assert len(_markers(directory)) == 1
+
+    async def test_survives_a_version_with_no_chunks(self, chunk_index):
+        header, _ = CLAIMS
+
+        await chunk_index.replace_document(header, [])
+
+        assert await chunk_index.indexed_version(header.document_id) is None
+        assert await chunk_index.latest_version(header.document_id) == (
+            header.version_id
+        )
+
+    async def test_records_a_version_removed_before_it_was_applied(self, chunk_index):
+        header, _ = CLAIMS
+        await chunk_index.replace_document(*CLAIMS)
+
+        await chunk_index.remove_version(header.document_id, NEXT_VERSION_ID)
+
+        assert await chunk_index.indexed_version(header.document_id) == (
+            header.version_id
+        )
+        assert await chunk_index.latest_version(header.document_id) == NEXT_VERSION_ID
+
+    async def test_never_goes_back_to_an_older_version(self, chunk_index):
+        header, _ = CLAIMS
+        await chunk_index.replace_document(
+            dataclasses.replace(header, version_id=NEXT_VERSION_ID), []
+        )
+
+        await chunk_index.remove_version(header.document_id, header.version_id)
+
+        assert await chunk_index.latest_version(header.document_id) == NEXT_VERSION_ID
+
+    async def test_is_forgotten_with_the_document(self, chunk_index):
+        header, _ = CLAIMS
+        await chunk_index.replace_document(*CLAIMS)
+
+        await chunk_index.remove_document(header.document_id)
+
+        assert await chunk_index.latest_version(header.document_id) is None
+
+
+class TestIndexedVersion:
+    async def test_is_the_version_last_replaced(self, chunk_index):
+        header, chunks = CLAIMS
+        await chunk_index.replace_document(header, chunks)
+        await chunk_index.replace_document(
+            dataclasses.replace(header, version_id=NEXT_VERSION_ID),
+            [
+                dataclasses.replace(chunk, version_id=NEXT_VERSION_ID)
+                for chunk in chunks
+            ],
+        )
+
+        assert await chunk_index.indexed_version(header.document_id) == NEXT_VERSION_ID
+
+    async def test_is_none_for_an_absent_document(self, chunk_index):
+        assert await chunk_index.indexed_version(OTHER_DOCUMENT_ID) is None
 
 
 class TestOpeningTheIndex:

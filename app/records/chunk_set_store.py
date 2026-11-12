@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Protocol
 from botocore import exceptions as botocore_exceptions
 
 from app.common import s3
-from app.records import chunk_sets
+from app.records import chunk_sets, ids, models
 
 if TYPE_CHECKING:
     from types_boto3_s3 import S3Client
@@ -26,6 +26,15 @@ class ChunkSetStore(Protocol):
 
     async def get(self, key: str) -> chunk_sets.ChunkSet | None:
         """`None` when nothing was staged under `key`."""
+        ...
+
+    async def delete(
+        self,
+        strategy: str,
+        document_id: ids.DocumentId,
+        version_id: ids.VersionId,
+    ) -> None:
+        """Removes the version's set at every status; a no-op for any not staged."""
         ...
 
 
@@ -56,6 +65,21 @@ class S3ChunkSetStore:
             raise
 
         return chunk_sets.loads(text)
+
+    async def delete(
+        self,
+        strategy: str,
+        document_id: ids.DocumentId,
+        version_id: ids.VersionId,
+    ) -> None:
+        # S3 answers a delete of a missing key with success, so a status that
+        # was never staged needs no special case.
+        for status in models.DocumentStatus:
+            await asyncio.to_thread(
+                self._client.delete_object,
+                Bucket=self._bucket,
+                Key=chunk_sets.key(strategy, document_id, version_id, status),
+            )
 
     def _read(self, key: str) -> str:
         response = self._client.get_object(Bucket=self._bucket, Key=key)

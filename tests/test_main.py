@@ -2,10 +2,49 @@ import os
 import sys
 
 import fastapi.testclient
+import pytest
 
 import app.entrypoints.fastapi
 
-client = fastapi.testclient.TestClient(app.entrypoints.fastapi.app)
+client = fastapi.testclient.TestClient(app.entrypoints.fastapi.create_app())
+
+
+@pytest.fixture
+def ingestion_probe(mocker):
+    """Swap the ingestion router for one holding a single known route."""
+    router = fastapi.APIRouter()
+    router.add_api_route("/ingestion-probe", lambda: {"ok": True})
+    mocker.patch.object(app.entrypoints.fastapi.ingestion_router, "router", router)
+    return "/ingestion-probe"
+
+
+def get(application, path):
+    return fastapi.testclient.TestClient(application).get(path).status_code
+
+
+def test_http_mode_mounts_the_ingestion_routes(ingestion_probe):
+    application = app.entrypoints.fastapi.create_app(app.config.IngestionMode.HTTP)
+
+    assert get(application, "/health") == 200
+    assert get(application, ingestion_probe) == 200
+
+
+def test_s3_mode_leaves_out_the_ingestion_routes(ingestion_probe):
+    application = app.entrypoints.fastapi.create_app(app.config.IngestionMode.S3)
+
+    assert get(application, "/health") == 200
+    assert get(application, ingestion_probe) == 404
+
+
+def test_create_app_reads_the_mode_from_config(mocker, ingestion_probe):
+    mocker.patch(
+        "app.config.get_config",
+        return_value=mocker.Mock(ingestion_mode=app.config.IngestionMode.S3),
+    )
+
+    application = app.entrypoints.fastapi.create_app()
+
+    assert get(application, ingestion_probe) == 404
 
 
 def test_lifespan(mocker):
@@ -18,7 +57,7 @@ def test_lifespan(mocker):
     index_builds = mocker.patch("app.index.builds.get_index_build_service")
     load = mocker.patch("app.index.active_index.load", mocker.AsyncMock())
 
-    with fastapi.testclient.TestClient(app.entrypoints.fastapi.app):
+    with fastapi.testclient.TestClient(app.entrypoints.fastapi.create_app()):
         mock_get_mongo.assert_called_once()
         index_builds.assert_called_once_with(database)
         load.assert_awaited_once_with(

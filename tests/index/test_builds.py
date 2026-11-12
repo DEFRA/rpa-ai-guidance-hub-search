@@ -75,7 +75,7 @@ class TestIndexBuildService:
         loaded = await index_builds.load(tmp_path / "second")
 
         assert loaded == published
-        assert _entry_count(tmp_path / "second") == 2
+        assert _entry_count(tmp_path / "second") == 3
 
     async def test_discards_a_build_made_from_a_build_no_longer_active(
         self,
@@ -147,7 +147,7 @@ class TestS3BuildStore:
 
         await s3_store.download(build_id, target)
 
-        assert _entry_count(target) == 2
+        assert _entry_count(target) == 3
 
     async def test_refuses_to_download_a_build_with_no_files(self, s3_store, tmp_path):
         with pytest.raises(FileNotFoundError, match="no files"):
@@ -203,7 +203,7 @@ class TestS3BuildStoreAgainstFloci:
 
         await store.download(build_id, target)
 
-        assert _entry_count(target) == 2
+        assert _entry_count(target) == 3
 
 
 @pytest.fixture

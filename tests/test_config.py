@@ -158,6 +158,24 @@ class TestAppConfig:
         assert cfg.enable_metrics is False
         assert cfg.floci_endpoint_url is None
         assert cfg.http_proxy is None
+        assert cfg.ingestion_mode is config.IngestionMode.HTTP
+
+    def test_reads_the_ingestion_mode_from_the_environment(self, monkeypatch):
+        monkeypatch.setenv("INGESTION_MODE", "s3")
+
+        cfg = config.AppConfig(
+            CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
+        )
+
+        assert cfg.ingestion_mode is config.IngestionMode.S3
+
+    def test_rejects_an_unknown_ingestion_mode(self, monkeypatch):
+        monkeypatch.setenv("INGESTION_MODE", "sqs")
+
+        with pytest.raises(pydantic.ValidationError, match="ingestion_mode"):
+            config.AppConfig(
+                CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
+            )
 
     def test_validator_parses_the_packed_model_config(self):
         cfg = config.AppConfig(

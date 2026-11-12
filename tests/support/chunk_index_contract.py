@@ -162,6 +162,52 @@ class ChunkIndexContract:
 
         assert await _found(chunk_index, _query("woodland")) == []
 
+    async def test_removes_the_indexed_version(self, chunk_index):
+        header, _ = CLAIMS
+        await chunk_index.replace_document(*CLAIMS)
+        await chunk_index.replace_document(*DRAFT)
+
+        await chunk_index.remove_version(header.document_id, header.version_id)
+
+        assert await chunk_index.indexed_version(header.document_id) is None
+        assert await _found(chunk_index, _query("holding")) == []
+        assert header.document_id not in await _titled(
+            chunk_index, _titles("Claims Guidance")
+        )
+        assert await _found(chunk_index, _query("woodland")) == [("Woodland",)]
+
+    async def test_removing_a_version_not_indexed_leaves_the_document(
+        self, chunk_index
+    ):
+        header, _ = CLAIMS
+        await chunk_index.replace_document(*CLAIMS)
+
+        await chunk_index.remove_version(header.document_id, NEXT_VERSION_ID)
+
+        assert await chunk_index.indexed_version(header.document_id) == (
+            header.version_id
+        )
+        assert await _found(chunk_index, _query("holding")) == [("Eligibility",)]
+
+    async def test_removing_a_version_of_an_absent_document_is_fine(self, chunk_index):
+        await chunk_index.remove_version(OTHER_DOCUMENT_ID, OTHER_VERSION_ID)
+
+        assert await chunk_index.indexed_version(OTHER_DOCUMENT_ID) is None
+
+    async def test_knows_the_version_indexed_for_a_document(self, chunk_index):
+        header, _ = CLAIMS
+        await chunk_index.replace_document(*CLAIMS)
+        next_version = fixtures.document(
+            [Section("1 Overview", 1, ("Rewritten guidance on orchards.",))],
+            fixtures.header(version_id=NEXT_VERSION_ID),
+        )
+
+        await chunk_index.replace_document(*next_version)
+
+        assert await chunk_index.indexed_version(header.document_id) == (
+            NEXT_VERSION_ID
+        )
+
     async def test_finds_only_the_statuses_asked_for(self, chunk_index):
         await chunk_index.replace_document(*CLAIMS)
         await chunk_index.replace_document(*DRAFT)

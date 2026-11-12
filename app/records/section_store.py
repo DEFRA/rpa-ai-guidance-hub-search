@@ -34,6 +34,14 @@ class SectionStore(Protocol):
         """`None` when the version was never stored."""
         ...
 
+    async def delete(
+        self,
+        document_id: ids.DocumentId,
+        version_id: ids.VersionId,
+    ) -> None:
+        """Removes the version's sections; a no-op if it was never stored."""
+        ...
+
 
 class S3SectionStore:
     """`sections/{documentId}/{versionId}.jsonl` in the search-store bucket."""
@@ -73,6 +81,18 @@ class S3SectionStore:
             raise
 
         return jsonl.loads(text)
+
+    async def delete(
+        self,
+        document_id: ids.DocumentId,
+        version_id: ids.VersionId,
+    ) -> None:
+        # S3 answers a delete of a missing key with success.
+        await asyncio.to_thread(
+            self._client.delete_object,
+            Bucket=self._bucket,
+            Key=jsonl.key(document_id, version_id),
+        )
 
     def _read(self, key: str) -> str:
         response = self._client.get_object(Bucket=self._bucket, Key=key)

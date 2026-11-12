@@ -5,11 +5,17 @@ the sectioning or a chunking strategy. It refuses chunks made by a strategy
 other than the one the index schema holds (`index_schema.CHUNK_STRATEGY`).
 Wiring lives in `from_config`.
 
-`publish` applies a job to the shared index:
+It never lets an older version replace a newer one (by UUIDv7 order), nor
+bring back a version that was removed. The index remembers the latest version
+it has applied or removed, even once no content is left, so a delayed or
+retried apply can't undo a newer version or a deletion. Every check reads the
+same copy of the index it changes.
+
+`publish` applies or removes a job against the shared index:
 
 1. download the active build into a temporary directory
-2. apply the staged chunks there
-3. upload the result as a new build and make it active
+2. apply the staged chunks there, or remove the version
+3. if that changed the index, upload the result as a new build and make it active
 """
 
 import logging
@@ -21,7 +27,7 @@ from app import config as app_config
 from app.common import mongo, s3
 from app.index import builds, chunk_index, index_schema, tantivy_index
 from app.indexing import jobs
-from app.records import chunk_set_store, chunk_sets
+from app.records import chunk_set_store, chunk_sets, ids
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +53,12 @@ class DocumentApplier:
         self._writer = writer
         self._strategy = strategy
 
-    async def apply(self, job: jobs.ApplyJob) -> None:
-        """Idempotent: applying the same job again leaves the same entries."""
+    async def apply(self, job: jobs.ApplyJob) -> bool:
+        """Idempotent: applying the same job again leaves the same entries.
+
+        Skips a version older than the one indexed, so a late request can't
+        undo a newer one.
+        """
         if job.strategy != self._strategy:
             msg = f"this index holds {self._strategy!r} chunks, not {job.strategy!r}"
             raise ChunkSetMismatchError(msg)
@@ -65,6 +75,18 @@ class DocumentApplier:
             msg = f"the chunk set at {job.chunk_set_key} is not the job's"
             raise ChunkSetMismatchError(msg)
 
+        latest = await self._writer.latest_version(job.document_id)
+
+        if latest is not None and await self._is_superseded(job, latest):
+            logger.info(
+                "Skipped %s version %s (%s): version %s has been seen since",
+                job.document_id,
+                job.version_id,
+                job.status,
+                latest,
+            )
+            return False
+
         await self._writer.replace_document(header, staged.chunks)
 
         logger.info(
@@ -74,6 +96,43 @@ class DocumentApplier:
             job.status,
             len(staged.chunks),
             job.strategy,
+        )
+        return True
+
+    async def remove(self, job: jobs.RemoveJob) -> bool:
+        """Idempotent: removing again, or an older version, changes nothing.
+
+        A version not yet indexed is still recorded, so its apply arriving
+        later is refused.
+        """
+        latest = await self._writer.latest_version(job.document_id)
+
+        if latest is not None and await self._is_superseded(job, latest):
+            logger.info(
+                "Nothing to remove for %s version %s: %s was seen",
+                job.document_id,
+                job.version_id,
+                latest,
+            )
+            return False
+
+        await self._writer.remove_version(job.document_id, job.version_id)
+
+        logger.info("Removed %s version %s", job.document_id, job.version_id)
+        return True
+
+    async def _is_superseded(
+        self,
+        job: jobs.ApplyJob | jobs.RemoveJob,
+        latest: ids.VersionId,
+    ) -> bool:
+        """Older than the latest, or the latest itself with its content gone."""
+        if ids.is_older(job.version_id, latest):
+            return True
+
+        return (
+            job.version_id == latest
+            and await self._writer.indexed_version(job.document_id) != latest
         )
 
 
@@ -89,13 +148,15 @@ def _is_jobs(staged: chunk_sets.ChunkSet, job: jobs.ApplyJob) -> bool:
 
 
 async def publish(
-    job: jobs.ApplyJob,
+    job: jobs.WriteJob,
     index_builds: builds.IndexBuildService,
     applier_for: Callable[[pathlib.Path], DocumentApplier],
-) -> builds.BuildId:
-    """Applies the job to the active build and publishes the result as active.
+) -> builds.BuildId | None:
+    """Applies or removes against the active build and publishes the result.
 
-    Raises `builds.LostSwapError` if another build became active meanwhile.
+    Returns the new active build, or `None` when the job left the index
+    unchanged, in which case nothing is uploaded. Raises `builds.LostSwapError`
+    if another build became active meanwhile.
     """
     # Tantivy can still be touching files as the directory is removed. A failed
     # cleanup of scratch space must not replace the error that got us here.
@@ -105,11 +166,21 @@ async def publish(
     ) as work:
         directory = pathlib.Path(work)
         base = await index_builds.load(directory)
-        await applier_for(directory).apply(job)
+        applier = applier_for(directory)
+
+        match job:
+            case jobs.ApplyJob():
+                changed = await applier.apply(job)
+            case jobs.RemoveJob():
+                changed = await applier.remove(job)
+
+        if not changed:
+            return None
+
         return await index_builds.publish(directory, base)
 
 
-async def publish_from_config(job: jobs.ApplyJob) -> builds.BuildId:
+async def publish_from_config(job: jobs.WriteJob) -> builds.BuildId | None:
     database = await mongo.get_db(await mongo.get_mongo_client())
     return await publish(job, builds.get_index_build_service(database), from_config)
 

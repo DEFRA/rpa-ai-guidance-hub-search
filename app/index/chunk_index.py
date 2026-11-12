@@ -117,12 +117,42 @@ class ChunkWriter(Protocol):
     ) -> None:
         """Atomically make these the document's only chunks and title.
 
-        Idempotent; [] removes the document.
+        Idempotent; [] leaves the document with no content. Either way the
+        document's latest version becomes this one.
         """
         ...
 
     async def remove_document(self, document_id: ids.DocumentId) -> None:
         """No-op if absent."""
+        ...
+
+    async def remove_version(
+        self,
+        document_id: ids.DocumentId,
+        version_id: ids.VersionId,
+    ) -> None:
+        """Removes this version's content, if indexed, and records it as seen.
+
+        Another version's content is left alone. The latest version never goes
+        back to an older one, so a late apply of this version can be refused.
+        """
+        ...
+
+    async def indexed_version(
+        self,
+        document_id: ids.DocumentId,
+    ) -> ids.VersionId | None:
+        """The version whose content is indexed; `None` if there is none."""
+        ...
+
+    async def latest_version(
+        self,
+        document_id: ids.DocumentId,
+    ) -> ids.VersionId | None:
+        """The newest version applied or removed, even with no content left.
+
+        `None` only if the index has never seen the document.
+        """
         ...
 
 

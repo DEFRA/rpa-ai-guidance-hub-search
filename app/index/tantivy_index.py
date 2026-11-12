@@ -9,6 +9,7 @@ and reloads, so a document's entries change in a single commit.
 
 import asyncio
 import pathlib
+import uuid
 from collections.abc import Mapping, Sequence
 
 import tantivy
@@ -42,10 +43,39 @@ class TantivyChunkIndex:
         if documents:
             documents.append(index_schema.to_title_document(header))
 
-        await asyncio.to_thread(self._replace, header.document_id, documents)
+        await asyncio.to_thread(
+            self._replace,
+            header.document_id,
+            header.version_id,
+            documents,
+        )
 
     async def remove_document(self, document_id: ids.DocumentId) -> None:
-        await asyncio.to_thread(self._replace, document_id, [])
+        """Forgets the document entirely, marker included."""
+        await asyncio.to_thread(self._forget, document_id)
+
+    async def remove_version(
+        self,
+        document_id: ids.DocumentId,
+        version_id: ids.VersionId,
+    ) -> None:
+        """Deletes the entries carrying both ids, chunks and title alike.
+
+        The marker moves to this version unless a newer one is already there.
+        """
+        await asyncio.to_thread(self._remove_version, document_id, version_id)
+
+    async def indexed_version(
+        self,
+        document_id: ids.DocumentId,
+    ) -> ids.VersionId | None:
+        return await asyncio.to_thread(self._version_of, document_id, content=True)
+
+    async def latest_version(
+        self,
+        document_id: ids.DocumentId,
+    ) -> ids.VersionId | None:
+        return await asyncio.to_thread(self._version_of, document_id, content=False)
 
     async def search(self, query: chunk_index.ChunkQuery) -> chunk_index.SectionHits:
         msg = "word search is not built yet"
@@ -61,14 +91,90 @@ class TantivyChunkIndex:
     def _replace(
         self,
         document_id: ids.DocumentId,
+        version_id: ids.VersionId,
         documents: Sequence[Mapping[str, index_schema.IndexValue]],
     ) -> None:
         writer = self._index.writer(heap_size=WRITER_HEAP_BYTES)
-        writer.delete_documents_by_term(index_schema.DOCUMENT_ID, str(document_id))
+        writer.delete_documents_by_query(self._entries(document_id, content=True))
 
         for document in documents:
             writer.add_document(_to_tantivy(document))
 
+        self._mark(writer, document_id, version_id)
+        self._commit(writer)
+
+    def _forget(self, document_id: ids.DocumentId) -> None:
+        writer = self._index.writer(heap_size=WRITER_HEAP_BYTES)
+        writer.delete_documents_by_term(index_schema.DOCUMENT_ID, str(document_id))
+        self._commit(writer)
+
+    def _remove_version(
+        self,
+        document_id: ids.DocumentId,
+        version_id: ids.VersionId,
+    ) -> None:
+        both = tantivy.Query.boolean_query(
+            [
+                (tantivy.Occur.Must, self._entries(document_id, content=True)),
+                (tantivy.Occur.Must, self._term(index_schema.VERSION_ID, version_id)),
+            ],
+        )
+        latest = self._version_of(document_id, content=False)
+        writer = self._index.writer(heap_size=WRITER_HEAP_BYTES)
+        writer.delete_documents_by_query(both)
+
+        if latest is None or not ids.is_older(version_id, latest):
+            self._mark(writer, document_id, version_id)
+
+        self._commit(writer)
+
+    def _mark(
+        self,
+        writer: tantivy.IndexWriter,
+        document_id: ids.DocumentId,
+        version_id: ids.VersionId,
+    ) -> None:
+        writer.delete_documents_by_query(self._entries(document_id, content=False))
+        writer.add_document(
+            _to_tantivy(index_schema.to_marker_document(document_id, version_id)),
+        )
+
+    def _version_of(
+        self,
+        document_id: ids.DocumentId,
+        *,
+        content: bool,
+    ) -> ids.VersionId | None:
+        searcher = self._index.searcher()
+        hits = searcher.search(
+            self._entries(document_id, content=content), limit=1
+        ).hits
+
+        if not hits:
+            return None
+
+        _, address = hits[0]
+        (version_id,) = searcher.doc(address)[index_schema.VERSION_ID]
+        return ids.VersionId(uuid.UUID(version_id))
+
+    def _entries(self, document_id: ids.DocumentId, *, content: bool) -> tantivy.Query:
+        """The document's content entries, or its one marker."""
+        marker = tantivy.Query.term_query(
+            self._index.schema,
+            index_schema.KIND,
+            index_schema.EntryKind.MARKER.value,
+        )
+        return tantivy.Query.boolean_query(
+            [
+                (tantivy.Occur.Must, self._term(index_schema.DOCUMENT_ID, document_id)),
+                (tantivy.Occur.MustNot if content else tantivy.Occur.Must, marker),
+            ],
+        )
+
+    def _term(self, field: str, value: uuid.UUID) -> tantivy.Query:
+        return tantivy.Query.term_query(self._index.schema, field, str(value))
+
+    def _commit(self, writer: tantivy.IndexWriter) -> None:
         writer.commit()
         writer.wait_merging_threads()
         self._index.reload()
