@@ -5,19 +5,15 @@ import uuid
 from collections.abc import Sequence
 from typing import Protocol
 
+from app.matching import word_match
 from app.records import ids, models
 
 MAX_LIMIT = 1000
-_ONE_TYPO_FROM = 4
-_TWO_TYPOS_FROM = 8
 
 
 def typo_budget(word: str) -> int:
     """Edits (insert, delete, substitute, swap neighbours) a near match allows."""
-    if len(word) >= _TWO_TYPOS_FROM:
-        return 2
-
-    return 1 if len(word) >= _ONE_TYPO_FROM else 0
+    return word_match.typo_budget(word)
 
 
 def _check_page(limit: int, offset: int = 0) -> None:
@@ -56,8 +52,9 @@ class ChunkQuery:
 class SectionHit:
     """The best chunk of one matching section; `score` only orders one result.
 
-    `exact` is False for a near (typo-tolerant) match. `url` is the document's;
-    the section's deep link is `{url}#{anchor}`.
+    `exact` is False for a near (typo-tolerant) match. `matches` counts the
+    matches in the chunk's headings and text. `url` is the document's; the
+    section's deep link is `{url}#{anchor}`.
     """
 
     section_id: ids.SectionId
@@ -73,6 +70,7 @@ class SectionHit:
     plain_text: str
     score: float
     exact: bool = True
+    matches: int = 1
 
 
 @dataclasses.dataclass(frozen=True)
