@@ -1,11 +1,11 @@
-"""Section files in the search-index bucket."""
+"""Section files in the search-store bucket."""
 
 import pytest
 
 from app.records import jsonl, section_store
 from tests.support import chunks as fixtures
 
-BUCKET = "search-index"
+BUCKET = "search-store"
 
 
 @pytest.fixture

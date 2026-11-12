@@ -1,11 +1,11 @@
-"""Staged chunk sets in the search-index bucket."""
+"""Staged chunk sets in the search-store bucket."""
 
 import pytest
 
 from app.records import chunk_set_store, chunk_sets
 from tests.support import chunks as fixtures
 
-BUCKET = "search-index"
+BUCKET = "search-store"
 HEADER, CHUNKS = fixtures.document([fixtures.Section("1 Overview", 1, ("Read me.",))])
 CHUNK_SET = chunk_sets.ChunkSet(HEADER, fixtures.FIXTURE_STRATEGY, tuple(CHUNKS))
 

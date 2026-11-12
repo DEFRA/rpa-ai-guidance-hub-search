@@ -1,27 +1,30 @@
 #!/usr/bin/env python3
-"""Index one document version from the command line.
+"""Index one document version into the shared index from the command line.
 
 For local development only: it helps you exercise indexing against local
-dependencies (floci, a local index directory). It is not how documents are
-indexed in CDP.
+dependencies (floci, MongoDB). It is not how documents are indexed in CDP.
 
-    uv run task index-document --source-type guide --index-dir DIR --document-id G --version-id V \
+    uv run task index-document --source-type guide --document-id G --version-id V \
         --status published --content-url s3://<bucket>/<G>/<V>/content.md
 
-The guide is prepared (sections stored, chunks staged in S3), then applied to
-the local index: the same two steps, through the same `from_config` wiring,
-that every other entry point will run. Only argument parsing lives here.
+The document is prepared: its sections are stored and its chunks staged in S3.
+Then the job is applied: the active index build is downloaded, the staged
+chunks are written into it, and the result is uploaded as a new build and made
+active. Needs S3 and MongoDB.
+
+Only argument parsing lives here. The two steps are `document_preparer`'s and
+`document_applier`'s, the same ones every other entry point will run.
 """
 
 import argparse
 import asyncio
 import datetime as dt
 import logging
-import pathlib
 import sys
 import uuid
 from collections.abc import Sequence
 
+from app.common import mongo
 from app.indexing import jobs
 from app.indexing.apply import document_applier
 from app.indexing.prepare import document_preparer
@@ -41,12 +44,16 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
-    asyncio.run(_run(job, args.index_dir))
+    asyncio.run(_run(job))
 
 
-async def _run(job: jobs.IndexJob, index_dir: pathlib.Path) -> None:
-    apply_job = await document_preparer.from_config().prepare(job)
-    await document_applier.from_config(index_dir).apply(apply_job)
+async def _run(job: jobs.IndexJob) -> None:
+    try:
+        apply_job = await document_preparer.from_config().prepare(job)
+        await document_applier.publish_from_config(apply_job)
+    finally:
+        if mongo.client is not None:
+            await mongo.client.close()
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -56,12 +63,6 @@ def _parser() -> argparse.ArgumentParser:
         type=models.SourceType,
         choices=list(models.SourceType),
         required=True,
-    )
-    parser.add_argument(
-        "--index-dir",
-        type=pathlib.Path,
-        required=True,
-        help="local directory holding the Tantivy index",
     )
     parser.add_argument("--document-id", type=uuid.UUID, required=True)
     parser.add_argument("--version-id", type=uuid.UUID, required=True)

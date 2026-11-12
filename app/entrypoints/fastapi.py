@@ -9,6 +9,7 @@ import uvicorn
 from app import config as app_config
 from app.common import mongo, tracing
 from app.health import router as health_router
+from app.index import active_index, builds
 
 logger = getLogger(__name__)
 
@@ -17,6 +18,12 @@ logger = getLogger(__name__)
 async def lifespan(_: fastapi.FastAPI) -> AsyncGenerator[None]:
     client = await mongo.get_mongo_client()
     logger.info("MongoDB client connected")
+
+    database = await mongo.get_db(client)
+    await active_index.load(
+        app_config.get_config().search_index_directory,
+        builds.get_index_build_service(database),
+    )
 
     yield
     if client:
