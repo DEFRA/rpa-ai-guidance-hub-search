@@ -93,19 +93,25 @@ class DocumentPreparer:
         )
 
 
-def from_config() -> DocumentPreparer:
+def from_config(
+    readers: Mapping[models.SourceType, sources.SourceReader] | None = None,
+) -> DocumentPreparer:
+    """Without `readers`, a guide is read from the API's bucket with no metadata."""
     config = app_config.get_config()
     client = s3.get_s3_client()
-    guide_files = guide_content.S3ContentSource(client)
 
-    return DocumentPreparer(
-        readers={
+    if readers is None:
+        guide_files = guide_content.S3ContentSource(client)
+        readers = {
             models.SourceType.GUIDE: guide_source.GuideSource(
                 guide_files,
                 guide_files,
                 guide_markdown.GuideMarkdownParser(),
             ),
-        },
+        }
+
+    return DocumentPreparer(
+        readers=readers,
         sections=section_store.S3SectionStore(client, config.search_store_s3_bucket),
         strategy=packed_chunking.PackedChunking(),
         chunk_sets=chunk_set_store.S3ChunkSetStore(

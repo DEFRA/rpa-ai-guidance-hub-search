@@ -1,4 +1,5 @@
-"""Where a guide's `content.md` is read from: the API's managed-docs bucket.
+"""Where a guide's `content.md` is read from: the API's managed-docs bucket,
+or the request that carried it inline.
 
 The API writes each version's content at `<documentId>/<versionId>/content.md`.
 When the API has section IDs for that version, it writes them beside the
@@ -79,6 +80,31 @@ class S3ContentSource:
         body: bytes = response["Body"].read()
 
         return body.decode("utf-8")
+
+
+class InlineContent:
+    """One version's content and section IDs, sent with the request.
+
+    Implements `ContentSource` and `SectionIdSource`. It holds a single
+    version, so it ignores the `content_url` it is asked for.
+    """
+
+    def __init__(
+        self,
+        markdown: str,
+        section_ids: Mapping[str, ids.SectionId] | None = None,
+    ) -> None:
+        self._markdown = markdown
+        self._section_ids = section_ids
+
+    async def read(self, content_url: str) -> str:  # noqa: ARG002
+        return self._markdown
+
+    async def read_section_ids(
+        self,
+        content_url: str,  # noqa: ARG002
+    ) -> Mapping[str, ids.SectionId] | None:
+        return self._section_ids
 
 
 def _section_ids(text: str, url: str) -> dict[str, ids.SectionId]:

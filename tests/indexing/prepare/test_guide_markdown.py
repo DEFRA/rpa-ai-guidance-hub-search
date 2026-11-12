@@ -97,6 +97,39 @@ class TestTheTitle:
             source=source_metadata.GuideMetadata.empty(),
         )
 
+    def test_carries_the_metadata_it_is_given(self):
+        metadata = source_metadata.GuideMetadata(version_number="1.2", owner="Team")
+
+        document = guide_markdown.GuideMarkdownParser().parse(
+            guides.job(), NESTED, metadata=metadata
+        )
+
+        assert document.header.source == metadata
+
+
+class TestAGivenTitle:
+    def _parse(self, markdown, title="CMS Title"):
+        return guide_markdown.GuideMarkdownParser().parse(
+            guides.job(), markdown, title=title
+        )
+
+    def test_replaces_the_markdown_title(self):
+        given = self._parse(NESTED)
+        own = guide_markdown.GuideMarkdownParser().parse(guides.job(), NESTED)
+
+        assert given.header.title == "CMS Title"
+        assert given.sections == own.sections
+
+    def test_needs_no_markdown_title(self):
+        document = self._parse(NESTED.removeprefix("# Claims Guidance\n"))
+
+        assert document.header.title == "CMS Title"
+        assert document.sections[0].heading is None
+
+    def test_still_refuses_two_markdown_titles(self):
+        with pytest.raises(guide_markdown.MalformedGuideError, match="at most one"):
+            self._parse(f"# One\n\n{NESTED}")
+
 
 class TestTheIds:
     def test_are_the_cms_ids_from_the_job(self):
