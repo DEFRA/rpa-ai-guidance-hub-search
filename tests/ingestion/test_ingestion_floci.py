@@ -26,7 +26,7 @@ def stack(floci_s3, mocker):
     mocker.patch("app.common.s3.get_s3_client", return_value=client)
     sections = section_store.S3SectionStore(client, bucket)
     staged = chunk_set_store.S3ChunkSetStore(client, bucket)
-    index_builds = builds.IndexBuilds(
+    index_builds = builds.IndexBuildService(
         builds.S3BuildStore(client, bucket, index_schema.SCHEMA_VERSION),
         fake_builds.InMemoryActiveBuild(),
     )

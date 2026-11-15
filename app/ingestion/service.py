@@ -4,6 +4,10 @@ The routes answer `202` and leave the work to `index` and `delete`, which run
 as background tasks in this process. One lock serialises them, in the order
 they arrived, so they never race each other for the index. That holds only
 within one replica; a queue replaces it later (`dispatch.ApplyDispatcher`).
+Applies will go through an internal SQS FIFO queue, and the CMS will publish
+through SNS -> SQS, so accepted work is durable rather than held in memory.
+Until then admission is unbounded: a CMS batch arriving faster than indexing
+completes would hold every pending request body in memory.
 
 Failures are logged and counted, then dropped. Every step is idempotent, so
 the CMS recovers by sending the same request again.
@@ -98,8 +102,13 @@ class IngestionService:
 _service: IngestionService | None = None
 
 
-def get_service() -> IngestionService:
-    """The one service per process, so its lock covers every request."""
+async def get_service() -> IngestionService:
+    """The one service per process, so its lock covers every request.
+
+    Async with no await, so it runs on the event loop and the check and the
+    construction cannot interleave. A sync dependency would run in worker
+    threads, where two first requests could each build a service and lock.
+    """
     global _service
 
     if _service is None:

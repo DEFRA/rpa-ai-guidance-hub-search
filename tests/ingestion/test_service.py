@@ -195,11 +195,11 @@ class TestOrdering:
 
 
 class TestFromConfig:
-    def test_builds_one_service_per_process(self, mocker):
+    async def test_builds_one_service_per_process(self, mocker):
         mocker.patch.object(service, "_service", None)
         mocker.patch("app.common.s3.get_s3_client")
 
-        assert service.get_service() is service.get_service()
+        assert await service.get_service() is await service.get_service()
 
     def test_counts_failures_only_with_metrics_enabled(self, mocker):
         counter = mocker.patch("app.common.metrics.counter")
