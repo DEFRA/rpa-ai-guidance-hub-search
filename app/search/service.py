@@ -5,7 +5,7 @@ import uuid
 from typing import Protocol
 
 from app.index import chunk_index
-from app.search import routing
+from app.records import models
 
 MAX_MATCHES = 1000
 
@@ -22,7 +22,7 @@ class TooManyMatchesError(Exception):
 @dataclasses.dataclass(frozen=True)
 class WordSearch:
     text: str
-    role: routing.Role
+    statuses: frozenset[models.DocumentStatus]
     tag: uuid.UUID | None = None
     limit: int = 10
     offset: int = 0
@@ -31,7 +31,7 @@ class WordSearch:
 @dataclasses.dataclass(frozen=True)
 class TitleSearch:
     text: str
-    role: routing.Role
+    statuses: frozenset[models.DocumentStatus]
     limit: int = 10
 
 

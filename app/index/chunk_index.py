@@ -34,8 +34,8 @@ class ChunkQuery:
     body, or the whole query is its `section_number` (`4.2.1`, not `4.2.10`).
     It matches nearly when each query word, in order and in one block, is a
     whole word within `typo_budget` of it. Every exact match ranks above every
-    near one. `statuses` is the caller's role already resolved. `tag` is a
-    document or version ID to search inside.
+    near one. Only documents in `statuses` match. `tag` is a document or
+    version ID to search inside.
     """
 
     text: str

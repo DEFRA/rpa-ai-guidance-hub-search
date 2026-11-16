@@ -1,4 +1,4 @@
-"""Keyword search: the role's statuses, the page, excerpts and too many matches."""
+"""Keyword search: the statuses asked for, the page, excerpts and too many matches."""
 
 import dataclasses
 import logging
@@ -6,11 +6,12 @@ import logging
 import pytest
 
 from app.records import models
-from app.search import keyword_search, routing, service
+from app.search import keyword_search, service
 from tests.fakes import chunk_index as fake_chunk_index
 from tests.support import chunks as fixtures
 
 Section = fixtures.Section
+PUBLISHED_ONLY = frozenset({models.DocumentStatus.PUBLISHED})
 PUBLISHED = fixtures.document(
     [
         Section("1 Overview", 1, ("Claim for livestock.",)),
@@ -42,18 +43,20 @@ def search(index):
     return keyword_search.KeywordSearch(index)
 
 
-def _words(text, role=routing.Role.VIEWER, **page):
-    return service.WordSearch(text=text, role=role, **page)
+def _words(text, statuses=PUBLISHED_ONLY, **page):
+    return service.WordSearch(text=text, statuses=statuses, **page)
 
 
 class TestSearchingWords:
-    async def test_finds_only_what_a_viewer_may_see(self, search):
+    async def test_finds_only_the_statuses_asked_for(self, search):
         results = await search.search_words(_words("livestock"))
 
         assert [result.hit.title for result in results.results] == ["Claims Guidance"]
 
-    async def test_finds_ready_for_publish_documents_for_a_designer(self, search):
-        results = await search.search_words(_words("livestock", routing.Role.DESIGNER))
+    async def test_finds_ready_for_publish_documents_when_asked(self, search):
+        results = await search.search_words(
+            _words("livestock", frozenset(models.DocumentStatus))
+        )
 
         assert {result.hit.title for result in results.results} == {
             "Claims Guidance",
@@ -110,9 +113,9 @@ class TestSearchingWords:
 
 
 class TestSearchingTitles:
-    async def test_finds_close_titles_the_role_may_see(self, search):
+    async def test_finds_close_titles_of_the_statuses_asked_for(self, search):
         results = await search.search_titles(
-            service.TitleSearch(text="Clams Guidanse", role=routing.Role.VIEWER),
+            service.TitleSearch(text="Clams Guidanse", statuses=PUBLISHED_ONLY),
         )
 
         assert [hit.title for hit in results.results] == ["Claims Guidance"]

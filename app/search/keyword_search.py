@@ -4,7 +4,7 @@ import logging
 import uuid
 
 from app.index import chunk_index
-from app.search import excerpts, routing, service
+from app.search import excerpts, service
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ class KeywordSearch:
         hits = await self._index.search(
             chunk_index.ChunkQuery(
                 text=request.text,
-                statuses=routing.statuses_for(request.role),
+                statuses=request.statuses,
                 tag=request.tag,
                 limit=request.limit,
                 offset=request.offset,
@@ -51,7 +51,7 @@ class KeywordSearch:
         hits = await self._index.search_titles(
             chunk_index.TitleQuery(
                 text=request.text,
-                statuses=routing.statuses_for(request.role),
+                statuses=request.statuses,
                 limit=request.limit,
             ),
         )
