@@ -41,7 +41,7 @@ WRITER_HEAP_BYTES = 50_000_000
 _CLAUSE = re.compile(r"\d+(?:\.\d+)*|[A-Z]+(?:\.\d+)+")
 _CLAUSE_BOOST = 5.0
 _SHORT = 2
-_NOT_A_WORD = re.compile(r"[^\w\s]|_")
+_NOT_A_WORD = re.compile(r"[\W_]")
 
 type _Fields = dict[str, list[Any]]
 
@@ -173,12 +173,20 @@ class TantivyChunkIndex:
 
         schema = self._index.schema
         fuzzy = [
-            tantivy.Query.fuzzy_term_query(
-                schema,
-                index_schema.BODY_EXACT,
-                word,
-                distance=word_match.typo_budget(word),
-                transposition_cost_one=True,
+            tantivy.Query.boolean_query(
+                [
+                    (
+                        tantivy.Occur.Should,
+                        tantivy.Query.fuzzy_term_query(
+                            schema,
+                            field,
+                            word,
+                            distance=word_match.typo_budget(word),
+                            transposition_cost_one=True,
+                        ),
+                    )
+                    for field in (index_schema.BODY_EXACT, index_schema.HEADING_EXACT)
+                ],
             )
             for word in words
         ]
@@ -190,8 +198,10 @@ class TantivyChunkIndex:
             if fields[index_schema.SECTION_ID][0] in found:
                 continue
 
-            matches = len(
-                word_match.find_near(text, _first(fields, index_schema.BODY) or "")
+            headings = "\n".join(fields.get(index_schema.HEADING_PATH, []))
+            body = _first(fields, index_schema.BODY) or ""
+            matches = len(word_match.find_near(text, headings)) + len(
+                word_match.find_near(text, body)
             )
 
             if matches:
@@ -318,22 +328,14 @@ class TantivyChunkIndex:
     def _title_shortlist(self, text: str) -> tantivy.Query | None:
         """Titles sharing an n-gram, or with a word whose start is near a query word.
 
-        The fuzzy terms catch typos too short to share an n-gram ("Gudia");
-        None lets every title through.
+        The word terms catch typos too short to share an n-gram ("Gudia") and
+        queries of words too short to have any ("UK AI"); None lets every title
+        through.
         """
         schema = self._index.schema
         runs = self._ngrams.analyze(text)
         options = [
-            tantivy.Query.fuzzy_term_query(
-                schema,
-                index_schema.TITLE,
-                word,
-                distance=word_match.typo_budget(word),
-                transposition_cost_one=True,
-                prefix=True,
-            )
-            for word in word_match.near_words(text)
-            if word_match.typo_budget(word)
+            self._title_word(schema, word) for word in word_match.near_words(text)
         ]
 
         if runs:
@@ -346,6 +348,23 @@ class TantivyChunkIndex:
 
         return tantivy.Query.boolean_query(
             [(tantivy.Occur.Should, option) for option in options],
+        )
+
+    @staticmethod
+    def _title_word(schema: tantivy.Schema, word: str) -> tantivy.Query:
+        """A title word near this one, unstemmed; whole words when too short to err."""
+        budget = word_match.typo_budget(word)
+
+        if not budget:
+            return tantivy.Query.term_query(schema, index_schema.TITLE_EXACT, word)
+
+        return tantivy.Query.fuzzy_term_query(
+            schema,
+            index_schema.TITLE_EXACT,
+            word,
+            distance=budget,
+            transposition_cost_one=True,
+            prefix=True,
         )
 
     def _replace(

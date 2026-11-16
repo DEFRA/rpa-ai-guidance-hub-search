@@ -130,8 +130,8 @@ class TestCuttingALongSentence:
 
         shown = excerpts.around(sentence, (first, first + 4))
 
-        assert shown.startswith("…w027 ")
-        assert shown.endswith(" w073…")
+        assert shown.startswith("…w026 ")
+        assert shown.endswith(" w074…")
         assert "w050" in shown
 
     @pytest.mark.parametrize("at", [100, 150, 200])

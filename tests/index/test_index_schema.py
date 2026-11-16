@@ -14,7 +14,8 @@ HEADER, CHUNKS = fixtures.document([fixtures.Section("4.2.1 Concurrent claims", 
 # The fields each schema version was released with. Changing `CHUNK_INDEX`
 # without bumping `SCHEMA_VERSION` fails here: add the new version's line.
 RELEASED_FIELDS = {
-    1: "2357483666b7ed957df00554d8f8b2604369450d665fc940527dfda5b839f499",
+    1: "91fcd65ac9858576afa97e56033112ed4b37bb6c58128c042709150632b825c2",
+    2: "bf09b5a424f2e50e4a6dfab74c14d425fa6d6adc8f642cea47acefc03a0b815e",
 }
 
 
@@ -68,6 +69,18 @@ class TestTheHeadingNgrams:
         document = index_schema.to_index_document(header, chunks[1])
 
         assert document[index_schema.HEADING_NGRAM] == "Claims\nEligibility"
+
+    def test_keep_each_heading_whole_and_unstemmed(self):
+        header, chunks = fixtures.document(
+            [
+                fixtures.Section("1 Claims", 1),
+                fixtures.Section("1.1 Eligibility", 2),
+            ],
+        )
+
+        document = index_schema.to_index_document(header, chunks[1])
+
+        assert document[index_schema.HEADING_EXACT] == ("Claims", "Eligibility")
 
 
 class TestAnIndexField:
@@ -145,6 +158,7 @@ class TestADocumentAsATitleEntry:
             "source_type",
             "url",
             "title",
+            "title_exact",
             "title_ngram",
         }
         assert (document["kind"], document["title_ngram"]) == (

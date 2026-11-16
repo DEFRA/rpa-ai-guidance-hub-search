@@ -2,11 +2,12 @@
 
 The rule is the milestone 1 spike's:
 
-- It looks in the text before the heading. The heading is shown with its
-  number, as `"1.1 Scope"`.
+- It looks in the text before the headings. The section's own heading is
+  shown with its number, as `"1.1 Scope"`; a parent heading, which the search
+  also covers, is shown as printed, without the child's number.
 - A sentence of up to `LONGEST_SENTENCE` characters is shown whole.
 - A longer one is cut at words to about `SENTENCE_REACH` characters either
-  side of its first match, with ellipses.
+  side of its first match, with ellipses, and never through the match itself.
 
 A near hit shows its near matches; an exact hit, its exact ones.
 """
@@ -28,18 +29,24 @@ type _Finder = Callable[[str, str], tuple[tuple[int, int], ...]]
 
 def of_hit(query: str, hit: chunk_index.SectionHit) -> service.Excerpt:
     find: _Finder = word_match.find if hit.exact else word_match.find_near
-    lines = [*hit.plain_text.split("\n"), heading_line(hit)]
+    lines = [*hit.plain_text.split("\n"), *heading_lines(hit)]
 
     for line in lines:
         for sentence in sentences(line):
             matches = find(query, sentence)
 
             if matches:
-                shown = around(sentence, matches[0][0])
+                shown = around(sentence, matches[0])
                 return service.Excerpt(text=shown, matches=find(query, shown))
 
     # A hit on its section number alone has no match in its text.
     return service.Excerpt(text=heading_line(hit), matches=())
+
+
+def heading_lines(hit: chunk_index.SectionHit) -> list[str]:
+    """The section's heading, then its parents, nearest first."""
+    parents = reversed(hit.heading_path[:-1])
+    return [heading_line(hit), *parents]
 
 
 def heading_line(hit: chunk_index.SectionHit) -> str:
@@ -62,16 +69,23 @@ def sentences(text: str) -> list[str]:
     return [sentence for sentence in [*found, rest] if sentence]
 
 
-def around(sentence: str, first: int) -> str:
+def around(sentence: str, match: tuple[int, int]) -> str:
     """A long sentence cut, at words, to the text around its first match."""
     if len(sentence) <= LONGEST_SENTENCE:
         return sentence
 
+    first, last = match
     start = max(first - SENTENCE_REACH, 0)
-    end = min(first + SENTENCE_REACH, len(sentence))
-    cut_from = 0 if start == 0 else sentence.find(" ", start) + 1
-    cut_to = end if end == len(sentence) else sentence.rfind(" ", 0, end)
+    end = min(max(first + SENTENCE_REACH, last), len(sentence))
+    # Move outward to a word boundary, so the match is never cut.
+    cut_from = 0 if start == 0 else sentence.rfind(" ", 0, start + 1) + 1
+    cut_to = len(sentence) if end == len(sentence) else _space_from(sentence, end)
     lead = ELLIPSIS if cut_from > 0 else ""
     tail = ELLIPSIS if cut_to < len(sentence) else ""
 
     return f"{lead}{sentence[cut_from:cut_to]}{tail}"
+
+
+def _space_from(sentence: str, at: int) -> int:
+    space = sentence.find(" ", at)
+    return len(sentence) if space == -1 else space

@@ -325,6 +325,17 @@ class ChunkIndexContract:
 
         assert (hit.heading_path, hit.exact) == (("Overview",), False)
 
+    async def test_finds_a_near_match_in_a_heading_alone(self, chunk_index):
+        await chunk_index.replace_document(*CLAIMS)
+
+        (hit,) = (await chunk_index.search(_query("hedgerws"))).hits
+
+        assert (hit.heading_path, hit.exact, hit.matches) == (
+            ("Eligibility", "Hedgerows"),
+            False,
+            1,
+        )
+
     async def test_ranks_every_near_match_below_every_exact_match(self, chunk_index):
         await chunk_index.replace_document(
             *fixtures.document(
@@ -475,6 +486,27 @@ class ChunkIndexContract:
             fixtures.DOCUMENT_ID,
             f"/guides/{fixtures.DOCUMENT_ID}",
         )
+
+    @pytest.mark.parametrize(
+        ("title", "text"),
+        [
+            pytest.param("Cats", "cots", id="typo-in-a-stemmed-word"),
+            pytest.param("AI UK", "UK AI", id="short-words-reordered"),
+            pytest.param("AI Guidance", "AI?", id="short-word-and-punctuation"),
+        ],
+    )
+    async def test_finds_a_title_the_shortlist_could_miss(
+        self, chunk_index, title, text
+    ):
+        header, chunks = fixtures.document(
+            [Section("1 Overview", 1)],
+            fixtures.header(title=title),
+        )
+        await chunk_index.replace_document(header, chunks)
+
+        hits = await chunk_index.search_titles(_titles(text))
+
+        assert [hit.title for hit in hits] == [title]
 
     async def test_finds_only_titles_of_the_statuses_asked_for(self, chunk_index):
         await chunk_index.replace_document(*DRAFT)
