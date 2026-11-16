@@ -123,7 +123,7 @@ class TestS3BuildStore:
 
         uploaded = _keys(moto_s3, BUCKET)
         assert uploaded == sorted(
-            f"index/v1/{build_id}/{path.name}"
+            f"guide-cms/index/v1/{build_id}/{path.name}"
             for path in directory.iterdir()
             if not path.name.endswith(".lock")
         )
@@ -163,7 +163,7 @@ class TestS3BuildStore:
 
         await s3_store.delete(deleted)
 
-        assert {key.split("/")[2] for key in _keys(moto_s3, BUCKET)} == {kept}
+        assert {key.split("/")[3] for key in _keys(moto_s3, BUCKET)} == {kept}
 
     async def test_removes_what_was_uploaded_when_a_transfer_fails(
         self,
@@ -251,7 +251,7 @@ class TestMongoActiveBuild:
         await pointer.swap(None, FIRST)
 
         record = await mongo_database[builds.INDEX_STATE].find_one(
-            {"_id": "chunks-v1"},
+            {"_id": "guide-cms-chunks-v1"},
         )
         assert record["updated_at"] is not None
         assert record["schema_version"] == VERSION
@@ -285,4 +285,7 @@ class TestFromConfig:
         )
 
         assert built._store._schema_version == index_schema.SCHEMA_VERSION
-        assert built._active._state_id == f"chunks-v{index_schema.SCHEMA_VERSION}"
+        assert (
+            built._active._state_id
+            == f"guide-cms-chunks-v{index_schema.SCHEMA_VERSION}"
+        )

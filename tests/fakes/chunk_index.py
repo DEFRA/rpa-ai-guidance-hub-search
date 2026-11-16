@@ -128,21 +128,23 @@ def _match(
     heading_weight = weights[index_schema.HEADING_PATH]
     body_weight = weights[index_schema.BODY]
     headings = "\n".join(chunk.heading_path)
-    number = heading_weight if text.strip() == chunk.section_number else 0
-    exact = (
-        number
-        + heading_weight * len(word_match.find(text, headings))
-        + body_weight * len(word_match.find(text, chunk.plain_text))
-    )
+    in_number = int(text.strip() == chunk.section_number)
+    in_headings = len(word_match.find(text, headings))
+    in_body = len(word_match.find(text, chunk.plain_text))
+    exact = heading_weight * (in_number + in_headings) + body_weight * in_body
 
     if exact:
-        return _hit(header, chunk, exact, exact=True)
+        matches = in_number + in_headings + in_body
+        return _hit(header, chunk, exact, exact=True, matches=matches)
 
-    near = heading_weight * _near_matches(text, headings) + body_weight * (
-        _near_matches(text, chunk.plain_text)
-    )
+    near_headings = _near_matches(text, headings)
+    near_body = _near_matches(text, chunk.plain_text)
+    near = heading_weight * near_headings + body_weight * near_body
 
-    return _hit(header, chunk, near, exact=False) if near else None
+    if not near:
+        return None
+
+    return _hit(header, chunk, near, exact=False, matches=near_headings + near_body)
 
 
 def _near_matches(query: str, text: str) -> int:
@@ -231,6 +233,7 @@ def _hit(
     score: float,
     *,
     exact: bool,
+    matches: int,
 ) -> chunk_index.SectionHit:
     return chunk_index.SectionHit(
         section_id=chunk.section_id,
@@ -246,4 +249,5 @@ def _hit(
         plain_text=chunk.plain_text,
         score=score,
         exact=exact,
+        matches=matches,
     )

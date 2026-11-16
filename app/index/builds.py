@@ -2,8 +2,12 @@
 
 Tantivy lifecycle only; not part of `ChunkIndex`, so a managed backend drops it.
 
+This is the Guide CMS index. Another source, such as GOV.UK content, ranks and
+publishes on its own lifecycle, so it gets its own prefix, state record and
+active index rather than a source filter on this one.
+
 Each build is a whole index directory, uploaded once to
-`index/v{schemaVersion}/{buildId}/` in the search-store bucket and never
+`guide-cms/index/v{schemaVersion}/{buildId}/` in the search-store bucket and never
 changed. Build IDs are UUIDv7s, so they sort by creation time. The active build
 is named by one record per schema version in search's MongoDB, swapped
 conditionally, so of two writers working from the same build only the first
@@ -39,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 BuildId = NewType("BuildId", str)
 
-INDEX_PREFIX = "index"
+INDEX_PREFIX = "guide-cms/index"
 INDEX_STATE = "index_state"
 
 # Tantivy's lock files belong to a running writer, not to the index.
@@ -117,7 +121,7 @@ class IndexBuildService:
 
 
 class S3BuildStore:
-    """Builds under `index/v{schemaVersion}/{buildId}/` in the search-store bucket."""
+    """Builds under `guide-cms/index/v{schemaVersion}/{buildId}/` in the bucket."""
 
     def __init__(self, client: S3Client, bucket: str, schema_version: int) -> None:
         self._client = client
@@ -260,4 +264,4 @@ def build_key(schema_version: int, build_id: BuildId, name: str) -> str:
 
 def state_id(schema_version: int) -> str:
     """The `index_state` record naming the active build of this schema version."""
-    return f"chunks-v{schema_version}"
+    return f"guide-cms-chunks-v{schema_version}"

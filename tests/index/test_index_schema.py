@@ -15,6 +15,7 @@ HEADER, CHUNKS = fixtures.document([fixtures.Section("4.2.1 Concurrent claims", 
 # without bumping `SCHEMA_VERSION` fails here: add the new version's line.
 RELEASED_FIELDS = {
     1: "91fcd65ac9858576afa97e56033112ed4b37bb6c58128c042709150632b825c2",
+    2: "bf09b5a424f2e50e4a6dfab74c14d425fa6d6adc8f642cea47acefc03a0b815e",
 }
 
 
@@ -53,6 +54,33 @@ class TestTheChunkIndexFields:
 
         for name in ["chunk_id", "document_id", "version_id", "status", "source_type"]:
             assert fields[name].kind == index_schema.FieldKind.KEYWORD, name
+
+
+class TestTheHeadingNgrams:
+    def test_index_each_heading_on_its_own_line(self):
+        nested = fixtures.document(
+            [
+                fixtures.Section("1 Claims", 1),
+                fixtures.Section("1.1 Eligibility", 2),
+            ],
+        )
+        header, chunks = nested
+
+        document = index_schema.to_index_document(header, chunks[1])
+
+        assert document[index_schema.HEADING_NGRAM] == "Claims\nEligibility"
+
+    def test_keep_each_heading_whole_and_unstemmed(self):
+        header, chunks = fixtures.document(
+            [
+                fixtures.Section("1 Claims", 1),
+                fixtures.Section("1.1 Eligibility", 2),
+            ],
+        )
+
+        document = index_schema.to_index_document(header, chunks[1])
+
+        assert document[index_schema.HEADING_EXACT] == ("Claims", "Eligibility")
 
 
 class TestAnIndexField:
@@ -130,6 +158,7 @@ class TestADocumentAsATitleEntry:
             "source_type",
             "url",
             "title",
+            "title_exact",
             "title_ngram",
         }
         assert (document["kind"], document["title_ngram"]) == (

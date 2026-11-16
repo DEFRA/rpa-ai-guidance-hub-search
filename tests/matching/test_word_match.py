@@ -19,3 +19,35 @@ class TestFindingAQuery:
     )
     def test_gives_each_match_start_and_end(self, query, text, spans):
         assert word_match.find(query, text) == spans
+
+
+class TestTheTypoBudget:
+    @pytest.mark.parametrize(
+        ("word", "budget"),
+        [("pay", 0), ("land", 1), ("guidance", 2), ("hedgerows", 2)],
+    )
+    def test_grows_with_the_word(self, word, budget):
+        assert word_match.typo_budget(word) == budget
+
+
+class TestFindingANearMatch:
+    @pytest.mark.parametrize(
+        ("query", "text", "spans"),
+        [
+            pytest.param("livestok", "for livestock.", ((4, 13),), id="missing-letter"),
+            pytest.param("recieve", "Receive it", ((0, 7),), id="swapped-letters"),
+            pytest.param("clam for", "a claim  for it", ((2, 12),), id="phrase"),
+            pytest.param("clam for", "a claim\nfor it", (), id="never-across-blocks"),
+            pytest.param("on", "Planting an area.", (), id="short-words-exact"),
+            pytest.param("clam", "claimant", (), id="whole-words-only"),
+            pytest.param(
+                "hedgerws", "hedgerow, hedgerow", ((0, 8), (10, 18)), id="every"
+            ),
+            pytest.param("?!", "Anything.", (), id="no-words"),
+        ],
+    )
+    def test_gives_each_match_start_and_end(self, query, text, spans):
+        assert word_match.find_near(query, text) == spans
+
+    def test_reads_the_query_words_without_punctuation(self):
+        assert word_match.near_words("Can I claim?") == ["can", "i", "claim"]
