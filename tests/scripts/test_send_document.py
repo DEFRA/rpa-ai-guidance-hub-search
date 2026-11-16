@@ -114,7 +114,9 @@ class TestSendDocument:
         ],
     )
     def test_refuses_bad_arguments(self, sent, args):
+        argv = [*_ids(), *args]
+
         with pytest.raises(SystemExit):
-            send_document.main([*_ids(), *args])
+            send_document.main(argv)
 
         assert sent == []

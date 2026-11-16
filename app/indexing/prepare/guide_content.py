@@ -55,5 +55,7 @@ class InlineContent:
     def __init__(self, markdown: str) -> None:
         self._markdown = markdown
 
-    async def read(self, content_url: str) -> str:  # noqa: ARG002
+    # Must match ContentSource.read, so the unused argument and the async are
+    # required rather than accidental.
+    async def read(self, content_url: str) -> str:  # noqa: ARG002  # NOSONAR
         return self._markdown
