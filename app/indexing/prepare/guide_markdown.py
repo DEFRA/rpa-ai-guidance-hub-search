@@ -5,21 +5,18 @@ line; a `#` line is never a section. Each `##` or deeper heading starts a
 section, and its level is the number of hashes minus one. Any text before the
 first `##` is a level-0 section with no heading and no anchor. Anchors follow
 the API's rules (`anchors`); section numbers such as `4.2.1` are split off the
-heading. Section ids come from the API's anchor map when it wrote one.
+heading.
 """
 
 import dataclasses
-import logging
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 
 import chonkie
 
 from app.indexing import jobs
 from app.indexing.prepare import anchors, blocks, plain_text, sources
 from app.records import ids, models, source_metadata
-
-logger = logging.getLogger(__name__)
 
 _TITLE = re.compile(r"# (?P<text>.+)")
 _HEADING = re.compile(r"(?P<hashes>#{2,}) (?P<text>.+)")
@@ -55,15 +52,13 @@ class GuideMarkdownParser:
         self,
         job: jobs.IndexJob,
         markdown: str,
-        section_ids: Mapping[str, ids.SectionId] | None = None,
         metadata: source_metadata.GuideMetadata | None = None,
         title: str | None = None,
     ) -> sources.SourceDocument:
         """Sync and CPU-bound. Raises `MalformedGuideError`, or `NotACmsIdError`.
 
-        `section_ids` is the API's anchor-to-section-ID map, when it has one.
-        Sections it doesn't name get hashed ids. A guide never mints ids: the
-        job must carry the CMS's UUIDv7 document and version ids.
+        A guide never mints ids: the job must carry the CMS's UUIDv7 document
+        and version ids.
 
         `title` is the CMS's; without it, the single `# ` line is the title.
         """
@@ -87,11 +82,9 @@ class GuideMarkdownParser:
             header=header,
             sections=[
                 _source_section(
-                    job,
                     section,
                     anchor,
                     tuple(blocks.parse(section.body, self._chef)),
-                    section_ids,
                 )
                 for section, anchor in zip(sections, section_anchors, strict=True)
             ],
@@ -169,11 +162,9 @@ def _anchors(sections: Sequence[_Section]) -> list[str]:
 
 
 def _source_section(
-    job: jobs.IndexJob,
     section: _Section,
     anchor: str,
     section_blocks: tuple[models.Block, ...],
-    given_ids: Mapping[str, ids.SectionId] | None,
 ) -> sources.SourceSection:
     if section.rendered is None:
         number, heading = None, None
@@ -187,26 +178,4 @@ def _source_section(
         level=section.level,
         anchor=anchor,
         blocks=section_blocks,
-        section_id=_given_id(job, anchor, given_ids),
     )
-
-
-def _given_id(
-    job: jobs.IndexJob,
-    anchor: str,
-    given_ids: Mapping[str, ids.SectionId] | None,
-) -> ids.SectionId | None:
-    if given_ids is None or not anchor:
-        return None
-
-    if anchor in given_ids:
-        return given_ids[anchor]
-
-    logger.warning(
-        "Guide %s version %s: no section ID for anchor %r; using its hash",
-        job.document_id,
-        job.version_id,
-        anchor,
-    )
-
-    return None

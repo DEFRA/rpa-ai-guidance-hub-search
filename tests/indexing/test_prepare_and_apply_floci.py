@@ -32,7 +32,6 @@ def run(floci_s3, tmp_path):
         readers={
             models.SourceType.GUIDE: guide_source.GuideSource(
                 source,
-                source,
                 guide_markdown.GuideMarkdownParser(),
             ),
         },

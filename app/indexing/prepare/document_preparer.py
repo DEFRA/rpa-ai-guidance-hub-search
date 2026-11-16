@@ -103,11 +103,9 @@ def from_config(
 ) -> DocumentPreparer:
     """Without `readers`, a guide is read from the API's bucket with no metadata."""
     if readers is None:
-        guide_files = guide_content.S3ContentSource(client)
         readers = {
             models.SourceType.GUIDE: guide_source.GuideSource(
-                guide_files,
-                guide_files,
+                guide_content.S3ContentSource(client),
                 guide_markdown.GuideMarkdownParser(),
             ),
         }

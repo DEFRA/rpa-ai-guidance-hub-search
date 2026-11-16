@@ -204,9 +204,9 @@ With the service running, send it a guide version the way the CMS will. The
 reply is `202`; the outcome is in the service's log.
 
 ```bash
-# inline content, optionally with the API's section ids
+# inline content
 uv run task send-document --document-id <uuid7> --version-id <uuid7> \
-    --title "Claims Guidance" --content-file guide.md [--section-ids sections.json]
+    --title "Claims Guidance" --content-file guide.md
 
 # content the API has stored in S3
 uv run task send-document --document-id <uuid7> --version-id <uuid7> \
@@ -275,7 +275,7 @@ mypy refuses one where another belongs:
 |:--------------------------------| :----------------------------- |
 | `GET: /docs`                    | Automatic API Swagger docs (the same document is committed as `docs/openapi.json`; regenerate with `uv run task openapi`) |
 | `GET: /health`                  | Health check endpoint          |
-| `PUT: /documents/{documentId}/versions/{versionId}` | Index a version (202). The body carries exactly one of `contentUrl` (`s3://…/content.md`) or `content` (`markdown`, optional `sectionIds`), plus `status`, `occurredAt`, `versionNumber` and the CMS `metadata`. `status` must be `published` (the index holds one version per document, so anything else is refused with 422), and `metadata.guideTitle` is required: it is the indexed title, never the Markdown's `# ` line. A version older than the one indexed is skipped. `http` mode only. |
+| `PUT: /documents/{documentId}/versions/{versionId}` | Index a version (202). The body carries exactly one of `contentUrl` (`s3://…/content.md`) or `content` (`markdown`), plus `status`, `occurredAt`, `versionNumber` and the CMS `metadata`. `status` must be `published` (the index holds one version per document, so anything else is refused with 422), and `metadata.guideTitle` is required: it is the indexed title, never the Markdown's `# ` line. A version older than the one indexed is skipped. `http` mode only. |
 | `DELETE: /documents/{documentId}/versions/{versionId}` | Remove a version at every status (202): from the index if it is the version indexed, and its staged files. `http` mode only. |
 
 Both ingestion routes reply once the request is valid and do the work afterwards,

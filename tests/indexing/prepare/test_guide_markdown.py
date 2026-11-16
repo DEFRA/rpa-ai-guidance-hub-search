@@ -1,7 +1,6 @@
 """A guide's `content.md` becomes canonical sections, then packed chunks."""
 
 import dataclasses
-import logging
 import uuid
 
 import pytest
@@ -38,18 +37,14 @@ Annex detail.
 """
 
 
-def _sections(markdown, section_ids=None):
-    document = guide_markdown.GuideMarkdownParser().parse(
-        guides.job(),
-        markdown,
-        section_ids,
-    )
+def _sections(markdown):
+    document = guide_markdown.GuideMarkdownParser().parse(guides.job(), markdown)
 
     return document.header, sectioning.build(document)
 
 
-def _chunk(markdown, section_ids=None):
-    header, sections = _sections(markdown, section_ids)
+def _chunk(markdown):
+    header, sections = _sections(markdown)
 
     return header, packed_chunking.PackedChunking().chunk(sections)
 
@@ -298,17 +293,7 @@ class TestPacking:
 
 
 class TestSectionIds:
-    def test_come_from_the_apis_map_by_anchor(self):
-        given = {"1-overview": ids.SectionId("0199b8a2-0000-7000-8000-0000000000e1")}
-
-        _, chunks = _chunk(NESTED, given)
-
-        found = _by_anchor(chunks)
-
-        assert found["1-overview"].section_id == given["1-overview"]
-        assert found["11-eligibility"].parent_section_id == given["1-overview"]
-
-    def test_fall_back_to_the_hash_without_a_map(self):
+    def test_hash_the_heading_path(self):
         _, chunks = _chunk(NESTED)
 
         assert _by_anchor(chunks)["11-eligibility"].section_id == ids.section_id(
@@ -316,18 +301,6 @@ class TestSectionIds:
             guides.DOCUMENT_ID,
             ("Overview", "Eligibility"),
         )
-
-    def test_fall_back_to_the_hash_for_an_anchor_the_map_lacks(self, caplog):
-        caplog.set_level(logging.WARNING)
-
-        _, chunks = _chunk(NESTED, {})
-
-        _, unmapped = _chunk(NESTED)
-
-        assert [chunk.section_id for chunk in chunks] == [
-            chunk.section_id for chunk in unmapped
-        ]
-        assert "11-eligibility" in caplog.text
 
     def test_duplicate_headings_get_different_ids_and_anchors(self):
         _, chunks = _chunk("# Title\n\n## Annex A\n\nOne.\n\n## Annex A\n\nTwo.")

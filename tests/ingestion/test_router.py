@@ -95,10 +95,7 @@ class TestIndex:
         client.put(
             PATH,
             json=_body(
-                content={
-                    "markdown": MARKDOWN,
-                    "sectionIds": {"1-overview": "section-1"},
-                },
+                content={"markdown": MARKDOWN},
                 versionNumber="1.2",
                 metadata={
                     "guideTitle": f"  {TITLE} ",
@@ -117,7 +114,6 @@ class TestIndex:
             schemes=("SFI",),
             guidance_types=("Process guide",),
         )
-        assert document.sections[-1].section_id == "section-1"
 
     def test_passes_on_the_trace_id(self, client, ingestion):
         client.put(PATH, json=_body(), headers={"x-cdp-request-id": "trace-1"})
@@ -139,10 +135,6 @@ class TestIndex:
             pytest.param({"metadata": {"owner": "Team"}}, id="no-title"),
             pytest.param({"metadata": {"guideTitle": "  "}}, id="blank-title"),
             pytest.param({"sourceType": "govuk"}, id="unknown-source"),
-            pytest.param(
-                {"content": {"markdown": MARKDOWN, "sectionIds": {"a": ""}}},
-                id="empty-section-id",
-            ),
         ],
     )
     def test_rejects_an_invalid_body(self, client, ingestion, fields):

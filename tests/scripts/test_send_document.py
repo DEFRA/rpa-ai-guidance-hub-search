@@ -66,8 +66,6 @@ class TestSendDocument:
     def test_sends_inline_content(self, sent, tmp_path):
         guide = tmp_path / "guide.md"
         guide.write_text("# Title\n")
-        section_ids = tmp_path / "sections.json"
-        section_ids.write_text('{"1-overview": "section-1"}')
 
         send_document.main(
             [
@@ -76,8 +74,6 @@ class TestSendDocument:
                 "Claims Guidance",
                 "--content-file",
                 str(guide),
-                "--section-ids",
-                str(section_ids),
                 "--version-number",
                 "1.2",
             ],
@@ -85,10 +81,7 @@ class TestSendDocument:
 
         (request,) = sent
         body = json.loads(request.content)
-        assert body["content"] == {
-            "markdown": "# Title\n",
-            "sectionIds": {"1-overview": "section-1"},
-        }
+        assert body["content"] == {"markdown": "# Title\n"}
         assert body["versionNumber"] == "1.2"
         schemas.IndexRequest.model_validate(body)
 
@@ -117,17 +110,6 @@ class TestSendDocument:
             pytest.param(
                 ["--title", "T", "--content-url", "s3://b/k", "--delete"],
                 id="content-and-delete",
-            ),
-            pytest.param(
-                [
-                    "--title",
-                    "T",
-                    "--content-url",
-                    "s3://b/k",
-                    "--section-ids",
-                    "s.json",
-                ],
-                id="section-ids-without-a-file",
             ),
         ],
     )

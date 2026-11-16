@@ -36,13 +36,16 @@ async def lifespan(_: fastapi.FastAPI) -> AsyncGenerator[None]:
 
 def create_app(
     ingestion_mode: app_config.IngestionMode | None = None,
+    config: app_config.AppConfig | None = None,
 ) -> fastapi.FastAPI:
     """Build the app, mounting the ingestion routes only in `http` mode.
 
     A factory rather than a module-level app, so importing this module never
-    builds `AppConfig`. Without an explicit mode it reads `INGESTION_MODE`.
+    builds `AppConfig`. Without a `config` it reads the environment's; without
+    an explicit mode it uses the config's `INGESTION_MODE`.
     """
-    config = app_config.get_config()
+    if config is None:
+        config = app_config.get_config()
 
     if ingestion_mode is None:
         ingestion_mode = config.ingestion_mode

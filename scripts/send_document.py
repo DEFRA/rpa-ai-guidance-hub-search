@@ -7,7 +7,7 @@ For local development; the service must run in `http` ingestion mode.
         --content-url s3://<bucket>/<G>/<V>/content.md
 
     uv run task send-document --document-id G --version-id V --title "Title" \
-        --content-file guide.md [--section-ids sections.json] [--version-number 1.2]
+        --content-file guide.md [--version-number 1.2]
 
     uv run task send-document --document-id G --version-id V --delete
 
@@ -16,7 +16,6 @@ The service replies `202`; check its log for the outcome.
 
 import argparse
 import datetime as dt
-import json
 import pathlib
 import sys
 import uuid
@@ -58,12 +57,7 @@ def _body(args: argparse.Namespace) -> dict[str, Any]:
     if args.content_url:
         body["contentUrl"] = args.content_url
     else:
-        body["content"] = {
-            "markdown": args.content_file.read_text(),
-            "sectionIds": (
-                json.loads(args.section_ids.read_text()) if args.section_ids else None
-            ),
-        }
+        body["content"] = {"markdown": args.content_file.read_text()}
 
     return body
 
@@ -80,7 +74,6 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--title", help="the guide's title, as the CMS knows it")
     parser.add_argument("--version-number")
-    parser.add_argument("--section-ids", type=pathlib.Path)
 
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--content-url")
@@ -93,9 +86,6 @@ def _parser() -> argparse.ArgumentParser:
 def _check(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     if not args.delete and not args.title:
         parser.error("--title is needed unless deleting")
-
-    if args.section_ids and not args.content_file:
-        parser.error("--section-ids goes with --content-file")
 
 
 if __name__ == "__main__":

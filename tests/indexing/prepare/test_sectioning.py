@@ -9,14 +9,13 @@ from tests.support import chunks as fixtures
 HEADER = fixtures.header()
 
 
-def _section(heading, level, *, anchor="", section_id=None, text="Body."):
+def _section(heading, level, *, anchor="", text="Body."):
     return sources.SourceSection(
         heading=heading,
         section_number=None,
         level=level,
         anchor=anchor,
         blocks=(fixtures.paragraph(text),),
-        section_id=section_id,
     )
 
 
@@ -53,15 +52,7 @@ class TestBuild:
             ("Claims", "Maps"),
         ]
 
-    def test_keeps_a_section_id_the_source_gave(self):
-        given = ids.SectionId("given")
-
-        built = _build(_section("Claims", 1, section_id=given), _section("Sub", 2))
-
-        assert built[0].section_id == given
-        assert built[1].parent_section_id == given
-
-    def test_hashes_an_id_the_source_did_not_give(self):
+    def test_hashes_the_heading_path(self):
         built = _build(_section("Claims", 1))
 
         assert built[0].section_id == ids.section_id(

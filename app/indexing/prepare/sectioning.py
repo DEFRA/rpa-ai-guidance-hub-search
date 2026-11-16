@@ -1,7 +1,7 @@
 """Turns any source's `SourceDocument` into canonical `SectionRecord`s.
 
-Shared by every source: heading paths, section ids (the source's, else a hash
-of the heading path), parents, ordinals and references are worked out the same
+Shared by every source: heading paths, section ids (a hash of the heading
+path), parents, ordinals and references are worked out the same
 way whatever the content came from.
 """
 
@@ -18,11 +18,7 @@ def build(document: sources.SourceDocument) -> list[models.SectionRecord]:
     header = document.header
     sections = document.sections
     paths = _heading_paths(sections)
-    hashed = ids.section_ids(header.source_type, header.document_id, paths)
-    resolved = [
-        section.section_id or fallback
-        for section, fallback in zip(sections, hashed, strict=True)
-    ]
+    resolved = ids.section_ids(header.source_type, header.document_id, paths)
     parents = _parents(sections, resolved)
     by_anchor = {
         section.anchor: section_id

@@ -220,27 +220,12 @@
         "type": "object"
       },
       "InlineContent": {
-        "description": "The version's `content.md`, and the API's `{anchor: sectionId}` map.",
+        "description": "The version's `content.md`.",
         "properties": {
           "markdown": {
             "minLength": 1,
             "title": "Markdown",
             "type": "string"
-          },
-          "sectionIds": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sectionids"
           }
         },
         "required": [

@@ -30,12 +30,9 @@ class _CamelModel(pydantic.BaseModel):
 
 
 class InlineContent(_CamelModel):
-    """The version's `content.md`, and the API's `{anchor: sectionId}` map."""
+    """The version's `content.md`."""
 
     markdown: str = pydantic.Field(min_length=1)
-    section_ids: (
-        dict[str, Annotated[str, pydantic.StringConstraints(min_length=1)]] | None
-    ) = None
 
 
 class IndexMetadata(guide_cms.CmsGuideMetadata):
@@ -98,20 +95,12 @@ class IndexRequest(_CamelModel):
         metadata = guide_cms.version_metadata(self.metadata, self.version_number)
         title = self.metadata.guide_title
 
-        if self.content is None:
-            files = guide_content.S3ContentSource(client)
-            return guide_source.GuideSource(files, files, parser, metadata, title)
-
-        section_ids = self.content.section_ids
-        inline = guide_content.InlineContent(
-            self.content.markdown,
-            None
-            if section_ids is None
-            else {
-                anchor: ids.SectionId(value) for anchor, value in section_ids.items()
-            },
+        content: guide_content.ContentSource = (
+            guide_content.S3ContentSource(client)
+            if self.content is None
+            else guide_content.InlineContent(self.content.markdown)
         )
-        return guide_source.GuideSource(inline, inline, parser, metadata, title)
+        return guide_source.GuideSource(content, parser, metadata, title)
 
 
 class Operation(enum.StrEnum):

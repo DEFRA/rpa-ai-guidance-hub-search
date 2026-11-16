@@ -52,7 +52,6 @@ def _preparer(source, sections, staged, readers=None):
             {
                 models.SourceType.GUIDE: guide_source.GuideSource(
                     source,
-                    source,
                     guide_markdown.GuideMarkdownParser(),
                 ),
             }
@@ -119,16 +118,6 @@ class TestPrepare:
         again = await preparer.prepare(guides.job())
 
         assert (again, staged.sets) == (first, {first.chunk_set_key: chunk_set})
-
-    async def test_uses_the_apis_section_ids(self, preparer, source, sections):
-        section = ids.SectionId("0199b8a2-0000-7000-8000-0000000000e1")
-        source.section_ids[guides.job().content_url] = {"1-overview": section}
-
-        await preparer.prepare(guides.job())
-
-        _, stored = sections.files[guides.DOCUMENT_ID, guides.VERSION_ID]
-
-        assert stored[0].section_id == section
 
     async def test_stores_nothing_for_a_malformed_guide(
         self,
@@ -238,7 +227,7 @@ class TestFromConfig:
         inline = guide_content.InlineContent(MARKDOWN)
         metadata = source_metadata.GuideMetadata(version_number="1.2")
         reader = guide_source.GuideSource(
-            inline, inline, guide_markdown.GuideMarkdownParser(), metadata
+            inline, guide_markdown.GuideMarkdownParser(), metadata
         )
 
         preparer = document_preparer.from_config(

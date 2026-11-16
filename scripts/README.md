@@ -14,8 +14,7 @@
   --content-url s3://…/content.md`; reads `.env`, so copy `.env.example` first.)
 - `send_document.py` — local development only. Sends one version to a running
   service's ingestion routes, as the CMS will: `--content-url s3://…` or
-  `--content-file guide.md [--section-ids sections.json]` to index, `--delete` to
-  remove. `--url` defaults to `http://localhost:8085`; the service must be in
+  `--content-file guide.md` to index, `--delete` to remove. `--url` defaults to `http://localhost:8085`; the service must be in
   `http` mode (the default).
   Versions are sent as `published`, with `--title` as the CMS's `guideTitle`.
   (`uv run task send-document --document-id … --version-id … --title "…"
