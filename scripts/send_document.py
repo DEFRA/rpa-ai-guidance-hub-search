@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Send one document version to a running service, as the CMS would.
 
-For local development only: it exercises the HTTP ingestion routes end to end.
-The service must run in `http` ingestion mode (the default).
+For local development; the service must run in `http` ingestion mode.
 
     uv run task send-document --document-id G --version-id V --title "Title" \
         --content-url s3://<bucket>/<G>/<V>/content.md
@@ -12,10 +11,7 @@ The service must run in `http` ingestion mode (the default).
 
     uv run task send-document --document-id G --version-id V --delete
 
-Every version is sent as `published`, the only status the service indexes, and
-`--title` is sent as the CMS's `guideTitle`. The service replies `202` and does
-the work afterwards; check its log for the outcome. Only argument parsing and
-the request live here.
+The service replies `202`; check its log for the outcome.
 """
 
 import argparse

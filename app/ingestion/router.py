@@ -1,7 +1,6 @@
 """HTTP routes the CMS uses to index and delete document versions.
 
-Mounted only when `INGESTION_MODE` is `http`. Both answer `202` once the
-request is valid; the work runs after the reply (`service`).
+Mounted only when `INGESTION_MODE` is `http`.
 """
 
 from typing import Annotated
@@ -9,7 +8,7 @@ from typing import Annotated
 import fastapi
 
 from app import config as app_config
-from app.common import tracing
+from app.common import s3, tracing
 from app.indexing.prepare import guide_cms
 from app.ingestion import schemas, service
 from app.records import ids
@@ -38,9 +37,11 @@ async def index_version(
     body: schemas.IndexRequest,
     background: fastapi.BackgroundTasks,
     ingestion: Service,
+    config: app_config.Config,
+    client: s3.Client,
 ) -> schemas.Accepted:
     """Prepare this version, and index it if it is published."""
-    limit = app_config.get_config().max_inline_content_bytes
+    limit = config.max_inline_content_bytes
 
     if body.inline_bytes() > limit:
         raise fastapi.HTTPException(
@@ -49,7 +50,7 @@ async def index_version(
         )
 
     job = body.to_job(ids.DocumentId(document_id), ids.VersionId(version_id))
-    background.add_task(ingestion.index, job, body.to_reader(), _trace_id())
+    background.add_task(ingestion.index, job, body.to_reader(client), _trace_id())
 
     return schemas.Accepted(
         document_id=job.document_id,

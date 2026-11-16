@@ -7,10 +7,8 @@ some), and treat every metadata key as optional, since the API stores metadata
 untyped.
 
 `to_metadata` turns a guide and one of its versions into the canonical
-`GuideMetadata` the header carries; `version_metadata` does the same from the
-details and version number the CMS sends when it pushes a version. Nothing
-calls the CMS API itself. A GOV.UK source gets a sibling module of Content API
-models.
+`GuideMetadata` the header carries; `version_metadata` does the same from what
+the CMS pushes. A GOV.UK source gets a sibling module of Content API models.
 """
 
 import datetime as dt

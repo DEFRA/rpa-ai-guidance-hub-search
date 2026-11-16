@@ -203,9 +203,9 @@ class TestTheStrategy:
 
 
 class TestFromConfig:
-    async def test_prepares_through_the_configured_bucket(self, mocker, moto_s3):
-        mocker.patch("app.common.s3.get_s3_client", return_value=moto_s3)
-        bucket = app_config.get_config().search_store_s3_bucket
+    async def test_prepares_through_the_configured_bucket(self, moto_s3):
+        config = app_config.get_config()
+        bucket = config.search_store_s3_bucket
         for name in (guides.BUCKET, bucket):
             moto_s3.create_bucket(
                 Bucket=name,
@@ -215,7 +215,9 @@ class TestFromConfig:
             Bucket=guides.BUCKET, Key=guides.content_key(), Body=MARKDOWN
         )
 
-        apply_job = await document_preparer.from_config().prepare(guides.job())
+        apply_job = await document_preparer.from_config(config, moto_s3).prepare(
+            guides.job()
+        )
 
         stored = {
             item["Key"] for item in moto_s3.list_objects_v2(Bucket=bucket)["Contents"]
@@ -226,9 +228,9 @@ class TestFromConfig:
         }
         assert apply_job.strategy == index_schema.CHUNK_STRATEGY
 
-    async def test_reads_with_the_readers_it_is_given(self, mocker, moto_s3):
-        mocker.patch("app.common.s3.get_s3_client", return_value=moto_s3)
-        bucket = app_config.get_config().search_store_s3_bucket
+    async def test_reads_with_the_readers_it_is_given(self, moto_s3):
+        config = app_config.get_config()
+        bucket = config.search_store_s3_bucket
         moto_s3.create_bucket(
             Bucket=bucket,
             CreateBucketConfiguration={"LocationConstraint": "eu-west-2"},
@@ -239,7 +241,9 @@ class TestFromConfig:
             inline, inline, guide_markdown.GuideMarkdownParser(), metadata
         )
 
-        preparer = document_preparer.from_config({models.SourceType.GUIDE: reader})
+        preparer = document_preparer.from_config(
+            config, moto_s3, {models.SourceType.GUIDE: reader}
+        )
         await preparer.prepare(guides.job())
 
         stored = moto_s3.get_object(

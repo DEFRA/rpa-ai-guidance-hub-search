@@ -85,8 +85,7 @@ class S3ContentSource:
 class InlineContent:
     """One version's content and section IDs, sent with the request.
 
-    Implements `ContentSource` and `SectionIdSource`. It holds a single
-    version, so it ignores the `content_url` it is asked for.
+    Holds a single version, so it ignores `content_url`.
     """
 
     def __init__(

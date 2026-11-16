@@ -63,12 +63,9 @@ class GuideMarkdownParser:
 
         `section_ids` is the API's anchor-to-section-ID map, when it has one.
         Sections it doesn't name get hashed ids. A guide never mints ids: the
-        job must carry the CMS's UUIDv7 document and version ids. `metadata`
-        goes in the header as given; without it the header's is empty.
+        job must carry the CMS's UUIDv7 document and version ids.
 
-        `title` is the CMS's title. Given one, the Markdown may have at most one
-        `# ` line, which is skipped; without one, it must have exactly one, and
-        that is the title.
+        `title` is the CMS's; without it, the single `# ` line is the title.
         """
         version_id = _cms_ids(job)
         markdown_title, sections = _split(job, markdown, needs_title=title is None)

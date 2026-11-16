@@ -22,7 +22,7 @@ import datetime as dt
 import logging
 import pathlib
 import uuid
-from typing import TYPE_CHECKING, NewType, Protocol
+from typing import TYPE_CHECKING, Annotated, NewType, Protocol
 
 import fastapi
 import pymongo
@@ -235,17 +235,18 @@ class MongoActiveBuild:
 
 
 def get_index_build_service(
-    database: pymongo.asynchronous.database.AsyncDatabase = fastapi.Depends(
-        mongo.get_db,
-    ),
+    database: Annotated[
+        pymongo.asynchronous.database.AsyncDatabase, fastapi.Depends(mongo.get_db)
+    ],
+    config: app_config.Config,
+    client: s3.Client,
 ) -> IndexBuildService:
     """FastAPI dependency; also called directly with a database outside requests."""
-    config = app_config.get_config()
     version = index_schema.SCHEMA_VERSION
 
     return IndexBuildService(
         store=S3BuildStore(
-            s3.get_s3_client(),
+            client,
             config.search_store_s3_bucket,
             version,
         ),

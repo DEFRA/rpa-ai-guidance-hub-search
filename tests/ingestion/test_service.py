@@ -5,6 +5,8 @@ import logging
 
 import pytest
 
+from app import config as app_config
+from app.entrypoints import fastapi as entrypoint
 from app.indexing import jobs
 from app.ingestion import service
 from app.records import chunk_sets, models
@@ -83,6 +85,7 @@ def ingestion(calls, sections, staged, readers_seen, count_failure):
         return RecordingPreparer(calls)
 
     return service.IngestionService(
+        lock=asyncio.Lock(),
         dispatcher=RecordingDispatcher(calls),
         preparer_for=preparer_for,
         sections=sections,
@@ -194,23 +197,36 @@ class TestOrdering:
         assert calls[-1] == ("dispatch", REMOVE)
 
 
-class TestFromConfig:
-    async def test_builds_one_service_per_process(self, mocker):
-        mocker.patch.object(service, "_service", None)
-        mocker.patch("app.common.s3.get_s3_client")
+class TestGetService:
+    def test_every_request_shares_the_apps_lock(self, mocker):
+        app = entrypoint.create_app(app_config.IngestionMode.HTTP)
+        request = mocker.Mock(app=app)
+        config = app_config.get_config()
 
-        assert await service.get_service() is await service.get_service()
+        def built():
+            return service.get_service(
+                service.get_lock(request), config, mocker.Mock(), mocker.Mock()
+            )
+
+        first, second = built(), built()
+
+        assert first is not second
+        assert first._lock is second._lock is app.state.ingestion_lock
 
     def test_counts_failures_only_with_metrics_enabled(self, mocker):
         counter = mocker.patch("app.common.metrics.counter")
-        mocker.patch("app.common.s3.get_s3_client")
-        config = mocker.patch("app.config.get_config").return_value
-        config.search_store_s3_bucket = "bucket"
+        config = app_config.get_config()
 
-        config.enable_metrics = False
-        service.from_config()._count_failure()
+        def built(enable_metrics):
+            return service.get_service(
+                asyncio.Lock(),
+                config.model_copy(update={"enable_metrics": enable_metrics}),
+                mocker.Mock(),
+                mocker.Mock(),
+            )
+
+        built(enable_metrics=False)._count_failure()
         counter.assert_not_called()
 
-        config.enable_metrics = True
-        service.from_config()._count_failure()
+        built(enable_metrics=True)._count_failure()
         counter.assert_called_once_with(service.FAILED_METRIC, 1)

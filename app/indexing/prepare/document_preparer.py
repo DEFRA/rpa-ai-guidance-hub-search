@@ -9,9 +9,9 @@ chunk set; preparing never touches the index. Wiring lives in `from_config`.
 import asyncio
 import logging
 from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 from app import config as app_config
-from app.common import s3
 from app.indexing import jobs
 from app.indexing.prepare import (
     chunking,
@@ -23,6 +23,9 @@ from app.indexing.prepare import (
     sources,
 )
 from app.records import chunk_set_store, chunk_sets, models, section_store
+
+if TYPE_CHECKING:
+    from types_boto3_s3 import S3Client
 
 logger = logging.getLogger(__name__)
 
@@ -94,12 +97,11 @@ class DocumentPreparer:
 
 
 def from_config(
+    config: app_config.AppConfig,
+    client: S3Client,
     readers: Mapping[models.SourceType, sources.SourceReader] | None = None,
 ) -> DocumentPreparer:
     """Without `readers`, a guide is read from the API's bucket with no metadata."""
-    config = app_config.get_config()
-    client = s3.get_s3_client()
-
     if readers is None:
         guide_files = guide_content.S3ContentSource(client)
         readers = {

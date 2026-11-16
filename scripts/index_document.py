@@ -24,7 +24,8 @@ import sys
 import uuid
 from collections.abc import Sequence
 
-from app.common import mongo
+from app import config as app_config
+from app.common import mongo, s3
 from app.indexing import jobs
 from app.indexing.apply import document_applier
 from app.indexing.prepare import document_preparer
@@ -49,8 +50,10 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 async def _run(job: jobs.IndexJob) -> None:
     try:
-        apply_job = await document_preparer.from_config().prepare(job)
-        await document_applier.publish_from_config(apply_job)
+        config = app_config.get_config()
+        client = s3.get_s3_client(config)
+        apply_job = await document_preparer.from_config(config, client).prepare(job)
+        await document_applier.publish_from_config(config, client, apply_job)
     finally:
         if mongo.client is not None:
             await mongo.client.close()

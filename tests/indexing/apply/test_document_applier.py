@@ -433,36 +433,42 @@ class TestPublish:
         assert await index_builds.active_build() == removed
         assert removed != active
 
-    async def test_publishes_from_config(self, mocker):
+    async def test_publishes_from_config(self, mocker, tmp_path):
+        config = app_config.get_config()
         database = mocker.sentinel.database
-        mocker.patch("app.common.mongo.get_mongo_client", mocker.AsyncMock())
+        mongo_client = mocker.patch(
+            "app.common.mongo.get_mongo_client", mocker.AsyncMock()
+        )
         mocker.patch("app.common.mongo.get_db", mocker.AsyncMock(return_value=database))
-        from_config = mocker.patch("app.index.builds.get_index_build_service")
+        index_builds = mocker.patch("app.index.builds.get_index_build_service")
         publish = mocker.patch(
             "app.indexing.apply.document_applier.publish",
             mocker.AsyncMock(return_value="build"),
         )
         job = _job(_staged("Anything."))
 
-        assert await document_applier.publish_from_config(job) == "build"
-
-        from_config.assert_called_once_with(database)
-        publish.assert_awaited_once_with(
-            job,
-            from_config.return_value,
-            document_applier.from_config,
+        built = await document_applier.publish_from_config(
+            config, mocker.sentinel.s3, job
         )
+
+        assert built == "build"
+        mongo_client.assert_awaited_once_with(config)
+        index_builds.assert_called_once_with(database, config, mocker.sentinel.s3)
+        published, builds_used, applier_for = publish.await_args.args
+        assert (published, builds_used) == (job, index_builds.return_value)
+        applier = applier_for(tmp_path)
+        assert applier._chunk_sets._client is mocker.sentinel.s3
+        assert applier._chunk_sets._bucket == config.search_store_s3_bucket
 
 
 class TestFromConfig:
     async def test_applies_a_chunk_set_staged_in_the_configured_bucket(
         self,
-        mocker,
         moto_s3,
         tmp_path,
     ):
-        mocker.patch("app.common.s3.get_s3_client", return_value=moto_s3)
-        bucket = app_config.get_config().search_store_s3_bucket
+        config = app_config.get_config()
+        bucket = config.search_store_s3_bucket
         moto_s3.create_bucket(
             Bucket=bucket,
             CreateBucketConfiguration={"LocationConstraint": "eu-west-2"},
@@ -478,7 +484,9 @@ class TestFromConfig:
         )
         await chunk_set_store.S3ChunkSetStore(moto_s3, bucket).put(chunk_set)
 
-        await document_applier.from_config(tmp_path).apply(_job(chunk_set))
+        await document_applier.from_config(config, moto_s3, tmp_path).apply(
+            _job(chunk_set)
+        )
 
         index = tantivy.Index.open(str(tmp_path))
         tantivy_schema.register_tokenizers(index)

@@ -1,26 +1,21 @@
-"""Indexes and deletes the document versions the CMS sends, after replying.
+"""Indexes and deletes document versions as background tasks, after replying.
 
-The routes answer `202` and leave the work to `index` and `delete`, which run
-as background tasks in this process. One lock serialises them, in the order
-they arrived, so they never race each other for the index. That holds only
-within one replica; a queue replaces it later (`dispatch.ApplyDispatcher`).
-Applies will go through an internal SQS FIFO queue, and the CMS will publish
-through SNS -> SQS, so accepted work is durable rather than held in memory.
-Until then admission is unbounded: a CMS batch arriving faster than indexing
-completes would hold every pending request body in memory.
-
-Failures are logged and counted, then dropped. Every step is idempotent, so
-the CMS recovers by sending the same request again.
+One lock serialises the work within a replica until a queue replaces it.
+Failures are logged and dropped; every step is idempotent, so the CMS retries.
 """
 
 import asyncio
 import logging
 from collections.abc import Callable, Mapping
+from typing import Annotated
+
+import fastapi
 
 from app import config as app_config
 from app.common import metrics, s3
-from app.index import index_schema
+from app.index import builds, index_schema
 from app.indexing import dispatch, jobs, stages
+from app.indexing.apply import document_applier
 from app.indexing.prepare import document_preparer, sources
 from app.records import chunk_set_store, ids, models, section_store
 
@@ -34,6 +29,7 @@ Readers = Mapping[models.SourceType, sources.SourceReader]
 class IngestionService:
     def __init__(
         self,
+        lock: asyncio.Lock,
         dispatcher: dispatch.ApplyDispatcher,
         preparer_for: Callable[[Readers], stages.Preparer],
         sections: section_store.SectionStore,
@@ -41,13 +37,13 @@ class IngestionService:
         strategy: str = index_schema.CHUNK_STRATEGY,
         count_failure: Callable[[], None] = lambda: None,
     ) -> None:
+        self._lock = lock
         self._dispatcher = dispatcher
         self._preparer_for = preparer_for
         self._sections = sections
         self._chunk_sets = chunk_sets
         self._strategy = strategy
         self._count_failure = count_failure
-        self._lock = asyncio.Lock()
 
     async def index(
         self,
@@ -63,11 +59,7 @@ class IngestionService:
                 self._failed("index", job.document_id, job.version_id, trace_id)
 
     async def delete(self, job: jobs.RemoveJob, trace_id: str | None = None) -> None:
-        """Takes the version out of the index, then deletes its staged files.
-
-        The files go second: a leftover file is harmless and the next delete
-        removes it, whereas index entries without their files are not.
-        """
+        """Takes the version out of the index, then deletes its staged files."""
         async with self._lock:
             try:
                 await self._dispatcher.dispatch(job)
@@ -99,31 +91,31 @@ class IngestionService:
         self._count_failure()
 
 
-_service: IngestionService | None = None
+def get_lock(request: fastapi.Request) -> asyncio.Lock:
+    """FastAPI dependency: the lock `create_app` made, shared by every request."""
+    lock: asyncio.Lock = request.app.state.ingestion_lock
+    return lock
 
 
-async def get_service() -> IngestionService:
-    """The one service per process, so its lock covers every request.
+def get_service(
+    lock: Annotated[asyncio.Lock, fastapi.Depends(get_lock)],
+    config: app_config.Config,
+    client: s3.Client,
+    index_builds: Annotated[
+        builds.IndexBuildService, fastapi.Depends(builds.get_index_build_service)
+    ],
+) -> IngestionService:
+    """FastAPI dependency: a service per request, around the app's one lock."""
 
-    Async with no await, so it runs on the event loop and the check and the
-    construction cannot interleave. A sync dependency would run in worker
-    threads, where two first requests could each build a service and lock.
-    """
-    global _service
-
-    if _service is None:
-        _service = from_config()
-
-    return _service
-
-
-def from_config() -> IngestionService:
-    config = app_config.get_config()
-    client = s3.get_s3_client()
+    def preparer_for(readers: Readers) -> stages.Preparer:
+        return document_preparer.from_config(config, client, readers)
 
     return IngestionService(
-        dispatcher=dispatch.InProcessDispatcher(),
-        preparer_for=document_preparer.from_config,
+        lock=lock,
+        dispatcher=dispatch.InProcessDispatcher(
+            document_applier.publisher(config, client, index_builds)
+        ),
+        preparer_for=preparer_for,
         sections=section_store.S3SectionStore(client, config.search_store_s3_bucket),
         chunk_sets=chunk_set_store.S3ChunkSetStore(
             client, config.search_store_s3_bucket

@@ -1,17 +1,12 @@
-"""What the CMS sends to index a version, and what it gets back.
-
-camelCase in and out, as the CMS writes it. A request converts itself into the
-`IndexJob` and the reader that prepares it; routers only call the conversions.
-"""
+"""What the CMS sends to index a version, and what it gets back (camelCase)."""
 
 import datetime as dt
 import enum
-from typing import Annotated, Literal, Self
+from typing import TYPE_CHECKING, Annotated, Literal, Self
 
 import pydantic
 from pydantic import alias_generators
 
-from app.common import s3
 from app.indexing import jobs
 from app.indexing.prepare import (
     guide_cms,
@@ -21,6 +16,9 @@ from app.indexing.prepare import (
     sources,
 )
 from app.records import ids, models
+
+if TYPE_CHECKING:
+    from types_boto3_s3 import S3Client
 
 
 class _CamelModel(pydantic.BaseModel):
@@ -94,17 +92,14 @@ class IndexRequest(_CamelModel):
             occurred_at=self.occurred_at,
         )
 
-    def to_reader(self) -> sources.SourceReader:
-        """Reads the inline content, or the referenced content from S3.
-
-        The title is the CMS's `guideTitle`, never the Markdown's `# ` line.
-        """
+    def to_reader(self, client: S3Client) -> sources.SourceReader:
+        """Reads the inline content, or the referenced content from S3."""
         parser = guide_markdown.GuideMarkdownParser()
         metadata = guide_cms.version_metadata(self.metadata, self.version_number)
         title = self.metadata.guide_title
 
         if self.content is None:
-            files = guide_content.S3ContentSource(s3.get_s3_client())
+            files = guide_content.S3ContentSource(client)
             return guide_source.GuideSource(files, files, parser, metadata, title)
 
         section_ids = self.content.section_ids

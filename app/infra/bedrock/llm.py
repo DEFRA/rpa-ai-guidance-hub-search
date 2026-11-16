@@ -3,13 +3,20 @@ from pydantic_ai.providers import bedrock as bedrock_providers
 
 from app import config
 
-settings = config.get_config()
 
-provider = bedrock_providers.BedrockProvider(region_name=settings.aws_region)
+def claude_sonnet(app_config: config.AppConfig) -> bedrock_models.BedrockConverseModel:
+    """Claude Sonnet on Bedrock, with its guardrails if configured."""
+    provider = bedrock_providers.BedrockProvider(region_name=app_config.aws_region)
+
+    return _setup_model(
+        app_config.bedrock.claude_sonnet,  # type: ignore[attr-defined]
+        provider,
+    )
 
 
 def _setup_model(
     model_config: config.BedrockModelConfig,
+    provider: bedrock_providers.BedrockProvider,
 ) -> bedrock_models.BedrockConverseModel:
     """Create a BedrockConverseModel from configuration."""
 
@@ -35,6 +42,3 @@ def _setup_model(
         provider=provider,
         settings=build_settings(),
     )
-
-
-claude_sonnet = _setup_model(settings.bedrock.claude_sonnet)  # type: ignore[attr-defined]

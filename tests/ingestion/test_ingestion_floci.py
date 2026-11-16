@@ -1,9 +1,6 @@
-"""What the CMS sends, indexed and deleted end to end against floci's S3.
+"""What the CMS sends, indexed and deleted end to end against floci's S3."""
 
-Runs the real service, stores, index and S3 build store. Only the active-build
-pointer is in memory, so MongoDB isn't needed.
-"""
-
+import asyncio
 import uuid
 
 import pytest
@@ -21,9 +18,8 @@ NEXT_VERSION_ID = ids.VersionId(uuid.UUID("0199b8a2-0000-7000-8000-00000000f003"
 
 
 @pytest.fixture
-def stack(floci_s3, mocker):
+def stack(floci_s3):
     client, bucket = floci_s3
-    mocker.patch("app.common.s3.get_s3_client", return_value=client)
     sections = section_store.S3SectionStore(client, bucket)
     staged = chunk_set_store.S3ChunkSetStore(client, bucket)
     index_builds = builds.IndexBuildService(
@@ -45,6 +41,7 @@ def stack(floci_s3, mocker):
         return await document_applier.publish(job, index_builds, applier_for)
 
     ingestion = service.IngestionService(
+        lock=asyncio.Lock(),
         dispatcher=dispatch.InProcessDispatcher(publish),
         preparer_for=preparer_for,
         sections=sections,
@@ -70,9 +67,10 @@ def _inline(**fields):
     return _request(content={"markdown": guides.GUIDE.read_text()}, **fields)
 
 
-async def _index(ingestion, request, version_id=guides.VERSION_ID):
+async def _index(stack, request, version_id=guides.VERSION_ID):
+    client, _, ingestion, _ = stack
     await ingestion.index(
-        request.to_job(guides.DOCUMENT_ID, version_id), request.to_reader()
+        request.to_job(guides.DOCUMENT_ID, version_id), request.to_reader(client)
     )
 
 
@@ -106,7 +104,7 @@ class TestIndexing:
     ):
         client, bucket, ingestion, index_builds = stack
 
-        await _index(ingestion, _inline())
+        await _index(stack, _inline())
 
         assert await _indexed_version(index_builds, tmp_path) == guides.VERSION_ID
         stored = client.get_object(
@@ -127,7 +125,7 @@ class TestIndexing:
             Bucket=bucket, Key=guides.content_key(), Body=guides.GUIDE.read_bytes()
         )
 
-        await _index(ingestion, _request(contentUrl=job.content_url))
+        await _index(stack, _request(contentUrl=job.content_url))
 
         assert await _indexed_version(index_builds, tmp_path) == guides.VERSION_ID
 
@@ -135,7 +133,7 @@ class TestIndexing:
 class TestDeleting:
     async def test_removes_the_indexed_version_and_its_files(self, stack, tmp_path):
         client, bucket, ingestion, index_builds = stack
-        await _index(ingestion, _inline())
+        await _index(stack, _inline())
 
         await _delete(ingestion)
 
@@ -144,8 +142,8 @@ class TestDeleting:
 
     async def test_keeps_another_indexed_version(self, stack, tmp_path):
         client, bucket, ingestion, index_builds = stack
-        await _index(ingestion, _inline())
-        await _index(ingestion, _inline(), NEXT_VERSION_ID)
+        await _index(stack, _inline())
+        await _index(stack, _inline(), NEXT_VERSION_ID)
         active = await index_builds.active_build()
 
         await _delete(ingestion)

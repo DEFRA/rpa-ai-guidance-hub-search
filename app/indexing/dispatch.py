@@ -10,7 +10,6 @@ from typing import Protocol
 
 from app.index import builds
 from app.indexing import jobs
-from app.indexing.apply import document_applier
 
 
 class ApplyDispatcher(Protocol):
@@ -28,9 +27,7 @@ class InProcessDispatcher:
 
     def __init__(
         self,
-        publish: Callable[
-            [jobs.WriteJob], Awaitable[builds.BuildId | None]
-        ] = document_applier.publish_from_config,
+        publish: Callable[[jobs.WriteJob], Awaitable[builds.BuildId | None]],
     ) -> None:
         self._publish = publish
 

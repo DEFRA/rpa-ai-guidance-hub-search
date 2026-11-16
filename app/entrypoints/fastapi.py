@@ -1,3 +1,4 @@
+import asyncio
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -7,7 +8,7 @@ import fastapi
 import uvicorn
 
 from app import config as app_config
-from app.common import mongo, tracing
+from app.common import mongo, s3, tracing
 from app.health import router as health_router
 from app.index import active_index, builds
 from app.ingestion import router as ingestion_router
@@ -17,13 +18,14 @@ logger = getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: fastapi.FastAPI) -> AsyncGenerator[None]:
-    client = await mongo.get_mongo_client()
+    config = app_config.get_config()
+    client = await mongo.get_mongo_client(config)
     logger.info("MongoDB client connected")
 
-    database = await mongo.get_db(client)
+    database = await mongo.get_db(client, config)
     await active_index.load(
-        app_config.get_config().search_index_directory,
-        builds.get_index_build_service(database),
+        config.search_index_directory,
+        builds.get_index_build_service(database, config, s3.get_s3_client(config)),
     )
 
     yield
@@ -40,14 +42,19 @@ def create_app(
     A factory rather than a module-level app, so importing this module never
     builds `AppConfig`. Without an explicit mode it reads `INGESTION_MODE`.
     """
+    config = app_config.get_config()
+
     if ingestion_mode is None:
-        ingestion_mode = app_config.get_config().ingestion_mode
+        ingestion_mode = config.ingestion_mode
 
     app = fastapi.FastAPI(lifespan=lifespan, title="RPA Guidance Hub Search API")
-    app.add_middleware(tracing.TraceIdMiddleware)
+    app.add_middleware(tracing.TraceIdMiddleware, header=config.tracing_header)
     app.include_router(health_router.router)
 
     if ingestion_mode is app_config.IngestionMode.HTTP:
+        # One per app, so every request's ingestion service shares it
+        # (`ingestion.service.get_lock`).
+        app.state.ingestion_lock = asyncio.Lock()
         app.include_router(ingestion_router.router)
 
     return app

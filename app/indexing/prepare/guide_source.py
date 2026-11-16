@@ -1,8 +1,4 @@
-"""Reads one guide version into a `SourceDocument`.
-
-The content comes from the API's bucket, or inline from a request; the title
-and metadata, when the caller has them, come from the CMS.
-"""
+"""Reads one guide version, from S3 or inline, into a `SourceDocument`."""
 
 import asyncio
 

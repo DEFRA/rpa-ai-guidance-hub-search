@@ -7,6 +7,7 @@ import fastapi.testclient
 import pytest
 
 from app import config as app_config
+from app.common import s3
 from app.entrypoints import fastapi as entrypoint
 from app.indexing import jobs
 from app.indexing.prepare import guide_content, guide_source
@@ -37,9 +38,15 @@ def ingestion(mocker):
 
 
 @pytest.fixture
-def client(ingestion):
+def s3_client(mocker):
+    return mocker.sentinel.s3
+
+
+@pytest.fixture
+def client(ingestion, s3_client):
     app = entrypoint.create_app(app_config.IngestionMode.HTTP)
     app.dependency_overrides[service.get_service] = lambda: ingestion
+    app.dependency_overrides[s3.get_s3_client] = lambda: s3_client
     return fastapi.testclient.TestClient(app)
 
 
@@ -73,15 +80,14 @@ class TestIndex:
         )
         assert isinstance(reader, guide_source.GuideSource)
 
-    def test_accepts_a_content_url(self, client, ingestion, mocker):
-        mocker.patch("app.common.s3.get_s3_client")
-
+    def test_accepts_a_content_url(self, client, ingestion, s3_client):
         response = client.put(PATH, json=_body(content=None, contentUrl=CONTENT_URL))
 
         assert response.status_code == 202
         job, reader, _ = _indexed(ingestion)
         assert job.content_url == CONTENT_URL
         assert isinstance(reader._content_source, guide_content.S3ContentSource)
+        assert reader._content_source._client is s3_client
 
     async def test_hands_the_reader_the_content_title_and_metadata(
         self, client, ingestion
@@ -151,22 +157,22 @@ class TestIndex:
         assert client.put(path, json=_body()).status_code == 422
         ingestion.index.assert_not_awaited()
 
-    def test_rejects_inline_content_over_the_limit(self, client, ingestion, mocker):
+    def test_rejects_inline_content_over_the_limit(self, client, ingestion):
         small = app_config.get_config().model_copy(
             update={"max_inline_content_bytes": len(MARKDOWN) - 1}
         )
-        mocker.patch("app.config.get_config", return_value=small)
+        client.app.dependency_overrides[app_config.get_config] = lambda: small
 
         response = client.put(PATH, json=_body())
 
         assert response.status_code == 413
         ingestion.index.assert_not_awaited()
 
-    def test_accepts_inline_content_at_the_limit(self, client, mocker):
+    def test_accepts_inline_content_at_the_limit(self, client):
         exact = app_config.get_config().model_copy(
             update={"max_inline_content_bytes": len(MARKDOWN.encode())}
         )
-        mocker.patch("app.config.get_config", return_value=exact)
+        client.app.dependency_overrides[app_config.get_config] = lambda: exact
 
         assert client.put(PATH, json=_body()).status_code == 202
 

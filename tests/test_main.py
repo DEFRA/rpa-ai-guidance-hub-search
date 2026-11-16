@@ -55,11 +55,14 @@ def test_lifespan(mocker):
     database = mocker.MagicMock()
     mocker.patch("app.common.mongo.get_db", mocker.AsyncMock(return_value=database))
     index_builds = mocker.patch("app.index.builds.get_index_build_service")
+    mocker.patch("app.common.s3.get_s3_client", return_value=mocker.sentinel.s3)
     load = mocker.patch("app.index.active_index.load", mocker.AsyncMock())
 
     with fastapi.testclient.TestClient(app.entrypoints.fastapi.create_app()):
         mock_get_mongo.assert_called_once()
-        index_builds.assert_called_once_with(database)
+        index_builds.assert_called_once_with(
+            database, app.config.get_config(), mocker.sentinel.s3
+        )
         load.assert_awaited_once_with(
             app.config.get_config().search_index_directory,
             index_builds.return_value,

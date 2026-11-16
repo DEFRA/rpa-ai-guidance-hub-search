@@ -4,6 +4,7 @@ import pathlib
 import tempfile
 from typing import Annotated
 
+import fastapi
 import pydantic
 import pydantic_settings
 
@@ -191,3 +192,7 @@ def get_config() -> AppConfig:
         msg = f"Config validation failed with errors: {', '.join(error_strings)}"
         logger.error(msg)
         raise RuntimeError(msg) from None
+
+
+Config = Annotated[AppConfig, fastapi.Depends(get_config)]
+"""Injects the config into a FastAPI route or dependency."""
