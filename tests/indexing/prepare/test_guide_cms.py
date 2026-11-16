@@ -120,3 +120,18 @@ class TestToMetadata:
         metadata = guide_cms.to_metadata(guide, guide.versions[1])
 
         assert metadata == source_metadata.GuideMetadata(version_number="1.1")
+
+
+class TestVersionMetadata:
+    def test_combines_the_details_with_the_version_number(self):
+        details = guide_cms.CmsGuideMetadata.model_validate(
+            {"schemes": ["SFI"], "guidanceType": "Process guide", "goal": "Notes"},
+        )
+
+        metadata = guide_cms.version_metadata(details, "2.0")
+
+        assert metadata == source_metadata.GuideMetadata(
+            version_number="2.0",
+            schemes=("SFI",),
+            guidance_types=("Process guide",),
+        )

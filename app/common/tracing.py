@@ -4,8 +4,7 @@ from typing import Any
 
 import fastapi
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-
-from app import config as app_config
+from starlette.types import ASGIApp
 
 logger = getLogger(__name__)
 
@@ -19,10 +18,16 @@ ctx_response: contextvars.ContextVar[dict[str, Any] | None] = contextvars.Contex
 
 
 class TraceIdMiddleware(BaseHTTPMiddleware):
+    """Keeps the trace id from the `header` request header for the request."""
+
+    def __init__(self, app: ASGIApp, header: str) -> None:
+        super().__init__(app)
+        self._header = header
+
     async def dispatch(
         self, request: fastapi.Request, call_next: RequestResponseEndpoint
     ) -> fastapi.Response:
-        req_trace_id = request.headers.get(app_config.get_config().tracing_header, None)
+        req_trace_id = request.headers.get(self._header, None)
         if req_trace_id:
             ctx_trace_id.set(req_trace_id)
 

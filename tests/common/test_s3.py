@@ -14,12 +14,11 @@ class TestGetS3Client:
         mock_config = MagicMock()
         mock_config.floci_endpoint_url = "http://floci:4566"
         mock_config.aws_region = "eu-west-2"
-        monkeypatch.setattr("app.config.get_config", lambda: mock_config)
 
         mock_boto3_client = MagicMock()
         monkeypatch.setattr(boto3, "client", mock_boto3_client)
 
-        client = s3.get_s3_client()
+        client = s3.get_s3_client(mock_config)
 
         assert client is mock_boto3_client.return_value
         mock_boto3_client.assert_called_once_with(
@@ -35,12 +34,11 @@ class TestGetS3Client:
         mock_config = MagicMock()
         mock_config.floci_endpoint_url = None
         mock_config.aws_region = "eu-west-2"
-        monkeypatch.setattr("app.config.get_config", lambda: mock_config)
 
         mock_boto3_client = MagicMock()
         monkeypatch.setattr(boto3, "client", mock_boto3_client)
 
-        client = s3.get_s3_client()
+        client = s3.get_s3_client(mock_config)
 
         assert client is mock_boto3_client.return_value
         mock_boto3_client.assert_called_once_with(
@@ -54,7 +52,7 @@ class TestGetS3Client:
         sentinel_client = object()
         monkeypatch.setattr(s3, "client", sentinel_client)
 
-        result = s3.get_s3_client()
+        result = s3.get_s3_client(MagicMock())
 
         assert result is sentinel_client
 
@@ -65,11 +63,10 @@ class TestGetS3Client:
         mock_config = MagicMock()
         mock_config.floci_endpoint_url = None
         mock_config.aws_region = "eu-west-2"
-        monkeypatch.setattr("app.config.get_config", lambda: mock_config)
         mock_boto3_client = MagicMock()
         monkeypatch.setattr(boto3, "client", mock_boto3_client)
 
-        s3.get_s3_client()
+        s3.get_s3_client(mock_config)
 
         config = mock_boto3_client.call_args.kwargs["config"]
         assert config.connect_timeout == 2.5

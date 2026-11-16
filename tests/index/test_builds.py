@@ -6,6 +6,7 @@ import uuid
 import pytest
 import tantivy
 
+from app import config as app_config
 from app.index import builds, index_schema, tantivy_index, tantivy_schema
 from tests.fakes import builds as fake_builds
 from tests.support import chunks as fixtures
@@ -271,17 +272,17 @@ class TestMongoActiveBuild:
 
 class TestFromConfig:
     def test_wires_s3_and_mongo(self, mocker):
-        mocker.patch("app.common.s3.get_s3_client", return_value=mocker.sentinel.s3)
-
-        built = builds.get_index_build_service(mocker.MagicMock())
+        built = builds.get_index_build_service(
+            mocker.MagicMock(), app_config.get_config(), mocker.sentinel.s3
+        )
 
         assert built._store._client is mocker.sentinel.s3
         assert built._store._bucket == "rpa-ai-guidance-hub-search-store"
 
     def test_keys_builds_by_the_index_schema_version(self, mocker):
-        mocker.patch("app.common.s3.get_s3_client")
-
-        built = builds.get_index_build_service(mocker.MagicMock())
+        built = builds.get_index_build_service(
+            mocker.MagicMock(), app_config.get_config(), mocker.Mock()
+        )
 
         assert built._store._schema_version == index_schema.SCHEMA_VERSION
         assert built._active._state_id == f"chunks-v{index_schema.SCHEMA_VERSION}"

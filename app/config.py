@@ -4,6 +4,7 @@ import pathlib
 import tempfile
 from typing import Annotated
 
+import fastapi
 import pydantic
 import pydantic_settings
 
@@ -143,6 +144,7 @@ class AppConfig(pydantic_settings.BaseSettings):
     http_proxy: pydantic.HttpUrl | None = None
     enable_metrics: bool = False
     ingestion_mode: IngestionMode = IngestionMode.HTTP
+    max_inline_content_bytes: int = pydantic.Field(default=2 * 1024 * 1024, gt=0)
     tracing_header: str = "x-cdp-request-id"
     claude_sonnet_model_config: Annotated[
         BedrockModelConfig, pydantic_settings.NoDecode
@@ -190,3 +192,7 @@ def get_config() -> AppConfig:
         msg = f"Config validation failed with errors: {', '.join(error_strings)}"
         logger.error(msg)
         raise RuntimeError(msg) from None
+
+
+Config = Annotated[AppConfig, fastapi.Depends(get_config)]
+"""Injects the config into a FastAPI route or dependency."""

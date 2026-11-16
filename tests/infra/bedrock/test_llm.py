@@ -1,22 +1,14 @@
 """Tests for the Bedrock LLM module."""
 
-import importlib
-
-import pytest
-
+from app import config as app_config
 from app.infra.bedrock import llm
 
 
 class TestClaudeSonnet:
-    """Test claude_sonnet module-level export."""
-
-    @pytest.fixture(autouse=True)
-    def restore_module(self):
-        yield
-        importlib.reload(llm)
-
     def test_created_without_guardrails(self) -> None:
-        assert "bedrock_guardrail_config" not in llm.claude_sonnet.settings
+        model = llm.claude_sonnet(app_config.get_config())
+
+        assert "bedrock_guardrail_config" not in model.settings
 
     def test_created_with_guardrails(self, mocker) -> None:
         mock_config = mocker.Mock()
@@ -28,10 +20,9 @@ class TestClaudeSonnet:
         mock_config.bedrock.claude_sonnet.guardrails.id = "guardrail-123"
         mock_config.bedrock.claude_sonnet.guardrails.version = "1"
 
-        mocker.patch("app.config.get_config", return_value=mock_config)
-        importlib.reload(llm)
+        model = llm.claude_sonnet(mock_config)
 
-        assert llm.claude_sonnet.settings["bedrock_guardrail_config"] == {
+        assert model.settings["bedrock_guardrail_config"] == {
             "guardrailIdentifier": "guardrail-123",
             "guardrailVersion": "1",
             "trace": "enabled",

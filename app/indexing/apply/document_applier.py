@@ -21,13 +21,17 @@ same copy of the index it changes.
 import logging
 import pathlib
 import tempfile
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING
 
 from app import config as app_config
-from app.common import mongo, s3
+from app.common import mongo
 from app.index import builds, chunk_index, index_schema, tantivy_index
 from app.indexing import jobs
 from app.records import chunk_set_store, chunk_sets, ids
+
+if TYPE_CHECKING:
+    from types_boto3_s3 import S3Client
 
 logger = logging.getLogger(__name__)
 
@@ -180,17 +184,44 @@ async def publish(
         return await index_builds.publish(directory, base)
 
 
-async def publish_from_config(job: jobs.WriteJob) -> builds.BuildId | None:
-    database = await mongo.get_db(await mongo.get_mongo_client())
-    return await publish(job, builds.get_index_build_service(database), from_config)
+Publish = Callable[[jobs.WriteJob], Awaitable[builds.BuildId | None]]
 
 
-def from_config(index_dir: pathlib.Path) -> DocumentApplier:
-    config = app_config.get_config()
+def publisher(
+    config: app_config.AppConfig,
+    client: S3Client,
+    index_builds: builds.IndexBuildService,
+) -> Publish:
+    """`publish`, wired to the configured bucket and these builds."""
 
+    def applier_for(index_dir: pathlib.Path) -> DocumentApplier:
+        return from_config(config, client, index_dir)
+
+    async def publish_job(job: jobs.WriteJob) -> builds.BuildId | None:
+        return await publish(job, index_builds, applier_for)
+
+    return publish_job
+
+
+async def publish_from_config(
+    config: app_config.AppConfig,
+    client: S3Client,
+    job: jobs.WriteJob,
+) -> builds.BuildId | None:
+    """`publish` for an entry point outside a request; connects to MongoDB."""
+    database = await mongo.get_db(await mongo.get_mongo_client(config), config)
+    index_builds = builds.get_index_build_service(database, config, client)
+    return await publisher(config, client, index_builds)(job)
+
+
+def from_config(
+    config: app_config.AppConfig,
+    client: S3Client,
+    index_dir: pathlib.Path,
+) -> DocumentApplier:
     return DocumentApplier(
         chunk_sets=chunk_set_store.S3ChunkSetStore(
-            s3.get_s3_client(),
+            client,
             config.search_store_s3_bucket,
         ),
         writer=tantivy_index.TantivyChunkIndex(index_dir),

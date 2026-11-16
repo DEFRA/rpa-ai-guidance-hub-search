@@ -6,8 +6,9 @@
 
 The document is built from the FastAPI app without starting it, so no Mongo, S3 or
 Bedrock is involved. The app is built in ``http`` ingestion mode, so the document
-always includes the ingestion routes, and an explicit mode means ``AppConfig`` is
-never constructed, so none of its required environment variables need to be set.
+always includes the ingestion routes. Its config is ``AppConfig``'s defaults, built
+without validation: the document depends on no config value, so none of the required
+environment variables need to be set.
 """
 
 import argparse
@@ -22,7 +23,9 @@ OPENAPI_PATH = Path(__file__).resolve().parent.parent / "docs" / "openapi.json"
 
 
 def render() -> str:
-    app = entrypoint.create_app(config.IngestionMode.HTTP)
+    app = entrypoint.create_app(
+        config.IngestionMode.HTTP, config.AppConfig.model_construct()
+    )
     return json.dumps(app.openapi(), indent=2, sort_keys=True) + "\n"
 
 

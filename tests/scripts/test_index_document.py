@@ -2,6 +2,7 @@
 
 import pytest
 
+from app import config as app_config
 from app.common import mongo
 from app.records import models
 from scripts import index_document
@@ -23,6 +24,13 @@ def _args(status="published"):
         "--content-url",
         URL,
     ]
+
+
+@pytest.fixture(autouse=True)
+def s3_client(mocker):
+    return mocker.patch(
+        "app.common.s3.get_s3_client", return_value=mocker.sentinel.s3
+    ).return_value
 
 
 @pytest.fixture
@@ -68,7 +76,9 @@ class TestIndexDocument:
         )
         assert job.occurred_at.utcoffset() is not None
         assert job.source_type == models.SourceType.GUIDE
-        publish.assert_awaited_once_with(mocker.sentinel.apply_job)
+        publish.assert_awaited_once_with(
+            app_config.get_config(), mocker.sentinel.s3, mocker.sentinel.apply_job
+        )
 
     @pytest.mark.usefixtures("mongo_client")
     def test_applies_nothing_when_preparing_fails(self, preparer, publish):

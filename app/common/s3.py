@@ -24,9 +24,10 @@ once.
 """
 
 from logging import getLogger
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
 import boto3
+import fastapi
 from botocore import exceptions as botocore_exceptions
 from botocore.config import Config
 
@@ -44,12 +45,11 @@ _MISSING = frozenset({"NoSuchKey", "404"})
 client: S3Client | None = None
 
 
-def get_s3_client() -> S3Client:
+def get_s3_client(config: app_config.Config) -> S3Client:
+    """The process's one client, built from the config of the first call."""
     global client
 
     if client is None:
-        config = app_config.get_config()
-
         logger.info(
             "Creating S3 client%s",
             f" against {config.floci_endpoint_url}"
@@ -69,6 +69,10 @@ def get_s3_client() -> S3Client:
         )
 
     return client
+
+
+Client = Annotated["S3Client", fastapi.Depends(get_s3_client)]
+"""Injects the shared client into a FastAPI route or dependency."""
 
 
 def is_missing(error: botocore_exceptions.ClientError) -> bool:

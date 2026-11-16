@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from app.indexing import jobs
-from app.records import ids, models
+from app.records import models
 
 
 @dataclasses.dataclass(frozen=True)
@@ -20,8 +20,7 @@ class SourceSection:
     `heading` is the heading's plain text without its number, or `None` for
     text before the first heading. `level` is 1 for the top section level, 0
     for that leading text. `anchor` is the source's own fragment for the
-    heading. `section_id` is the source's id for the section, when it has one;
-    otherwise one is hashed from the heading path.
+    heading.
     """
 
     heading: str | None
@@ -29,7 +28,6 @@ class SourceSection:
     level: int
     anchor: str
     blocks: tuple[models.Block, ...]
-    section_id: ids.SectionId | None = None
 
 
 @dataclasses.dataclass(frozen=True)
