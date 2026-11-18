@@ -18,7 +18,8 @@ Near matches shortlist sections by fuzzy terms on the unstemmed body, check
 them with `word_match.find_near`, and rank below every exact match.
 
 Title search shortlists title entries by shared n-grams or fuzzy word starts,
-then scores them with `title_match`.
+then scores them with `title_match`. Title cover search shortlists titles
+holding a word near every query word, and checks them with `title_cover`.
 """
 
 import asyncio
@@ -32,7 +33,7 @@ from typing import Any
 import tantivy
 
 from app.index import chunk_index, index_schema, tantivy_schema
-from app.matching import title_match, word_match
+from app.matching import title_cover, title_match, word_match
 from app.records import ids, models
 
 WRITER_HEAP_BYTES = 50_000_000
@@ -116,6 +117,12 @@ class TantivyChunkIndex:
         query: chunk_index.TitleQuery,
     ) -> list[chunk_index.TitleHit]:
         return await asyncio.to_thread(self._search_titles, query)
+
+    async def search_title_covers(
+        self,
+        query: chunk_index.ChunkQuery,
+    ) -> list[chunk_index.TitleCoverHit]:
+        return await asyncio.to_thread(self._search_title_covers, query)
 
     def _search(self, query: chunk_index.ChunkQuery) -> chunk_index.SectionHits:
         text = " ".join(query.text.split())
@@ -288,6 +295,77 @@ class TantivyChunkIndex:
 
         return filters
 
+    def _search_title_covers(
+        self,
+        query: chunk_index.ChunkQuery,
+    ) -> list[chunk_index.TitleCoverHit]:
+        text = " ".join(query.text.split())
+
+        if not title_cover.words(text):
+            return []
+
+        searcher = self._index.searcher()
+        required = [
+            self._title_cover_shortlist(text),
+            *self._title_filters(query.statuses, query.tag),
+        ]
+        hits: list[chunk_index.TitleCoverHit] = []
+
+        for _, fields in _candidates(searcher, _all_of(required, None)):
+            title = fields[index_schema.TITLE][0]
+            coverage = title_cover.coverage(text, title)
+
+            if coverage:
+                hits.append(
+                    chunk_index.TitleCoverHit(
+                        document_id=ids.DocumentId(
+                            uuid.UUID(fields[index_schema.DOCUMENT_ID][0]),
+                        ),
+                        version_id=ids.VersionId(
+                            uuid.UUID(fields[index_schema.VERSION_ID][0]),
+                        ),
+                        title=title,
+                        status=models.DocumentStatus(fields[index_schema.STATUS][0]),
+                        url=fields[index_schema.URL][0],
+                        coverage=coverage,
+                        matches=title_cover.covers(text, title),
+                    ),
+                )
+
+        hits.sort(key=lambda hit: (-hit.coverage, hit.title, str(hit.document_id)))
+        return hits
+
+    def _title_cover_shortlist(self, text: str) -> tantivy.Query:
+        """Titles with a word near every query word, as `title_cover` forgives:
+        "reports" shortlists "Sample Report Layout Overview Notes"."""
+        schema = self._index.schema
+        return tantivy.Query.boolean_query(
+            [
+                (tantivy.Occur.Must, self._title_word(schema, word))
+                for word in dict.fromkeys(title_cover.words(text))
+            ],
+        )
+
+    def _title_filters(
+        self,
+        statuses: frozenset[models.DocumentStatus],
+        tag: uuid.UUID | None = None,
+    ) -> list[tantivy.Query]:
+        schema = self._index.schema
+        filters = [
+            tantivy.Query.term_query(
+                schema,
+                index_schema.KIND,
+                index_schema.EntryKind.TITLE.value,
+            ),
+            _status_filter(schema, statuses),
+        ]
+
+        if tag is not None:
+            filters.append(_tag_filter(schema, tag))
+
+        return filters
+
     def _search_titles(
         self,
         query: chunk_index.TitleQuery,
@@ -297,14 +375,8 @@ class TantivyChunkIndex:
         if not text:
             return []
 
-        schema = self._index.schema
         filters = [
-            tantivy.Query.term_query(
-                schema,
-                index_schema.KIND,
-                index_schema.EntryKind.TITLE.value,
-            ),
-            _status_filter(schema, query.statuses),
+            *self._title_filters(query.statuses),
             self._title_shortlist(text),
         ]
 

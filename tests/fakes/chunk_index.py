@@ -4,7 +4,7 @@ import re
 from collections.abc import Sequence
 
 from app.index import chunk_index, index_schema
-from app.matching import word_match
+from app.matching import title_cover, word_match
 from app.records import ids, models
 
 _WORD = re.compile(r"\w+")
@@ -106,6 +106,27 @@ class InMemoryChunkIndex:
         hits.sort(key=lambda hit: hit.score, reverse=True)
         return hits[: query.limit]
 
+    async def search_title_covers(
+        self,
+        query: chunk_index.ChunkQuery,
+    ) -> list[chunk_index.TitleCoverHit]:
+        hits = [
+            chunk_index.TitleCoverHit(
+                document_id=header.document_id,
+                version_id=header.version_id,
+                title=header.title,
+                status=header.status,
+                url=header.url,
+                coverage=coverage,
+                matches=title_cover.covers(query.text, header.title),
+            )
+            for header, _ in self._visible(query.statuses)
+            if query.tag is None or query.tag in {header.document_id, header.version_id}
+            if (coverage := title_cover.coverage(query.text, header.title))
+        ]
+        hits.sort(key=lambda hit: (-hit.coverage, hit.title, str(hit.document_id)))
+        return hits
+
     def _visible(
         self,
         statuses: frozenset[models.DocumentStatus],
@@ -148,7 +169,7 @@ def _match(
 
 
 def _near_matches(query: str, text: str) -> int:
-    """Runs of whole words in one block, each within the query word's budget."""
+    """Runs of whole words in one block, each `word_match.within_budget`."""
     words = [word.casefold() for word in _WORD.findall(query)]
 
     if not words:
@@ -162,7 +183,7 @@ def _near_matches(query: str, text: str) -> int:
         for start in range(len(candidates) - len(words) + 1):
             run = candidates[start : start + len(words)]
             count += all(
-                _distance(word, candidate) <= chunk_index.typo_budget(word)
+                word_match.within_budget(word, candidate)
                 for word, candidate in zip(words, run, strict=True)
             )
 
