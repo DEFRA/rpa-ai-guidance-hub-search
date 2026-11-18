@@ -18,9 +18,12 @@ hang a request. A failure that can be retried (standard mode: throttling, timeou
 caller. The cap is per call, not per request: a request that makes many calls, as
 storing a document does, can take longer than the front end waits.
 
-One client serves every request and thread: boto3 clients are thread-safe, and its
-connection pool (10 by default) is larger than the most writes a store makes at
-once.
+One client serves every request and thread: boto3 clients are thread-safe. Its
+connection pool holds `MAX_POOL_CONNECTIONS`, enough for every call this service
+can make at once: the documents being prepared (`ingestion.service`) one call each,
+plus the index build transfers (`index.builds`). Past the pool, urllib3 opens a
+connection for the one call and then throws it away, logging "Connection pool is
+full".
 """
 
 from logging import getLogger
@@ -40,6 +43,7 @@ logger = getLogger(__name__)
 
 TIMEOUT_SECONDS = 2.5
 ATTEMPTS = 2
+MAX_POOL_CONNECTIONS = 20
 _MISSING = frozenset({"NoSuchKey", "404"})
 
 client: S3Client | None = None
@@ -65,6 +69,7 @@ def get_s3_client(config: app_config.Config) -> S3Client:
                 connect_timeout=TIMEOUT_SECONDS,
                 read_timeout=TIMEOUT_SECONDS,
                 retries={"total_max_attempts": ATTEMPTS, "mode": "standard"},
+                max_pool_connections=MAX_POOL_CONNECTIONS,
             ),
         )
 

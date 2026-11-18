@@ -1,10 +1,17 @@
 """Indexes and deletes document versions as background tasks, after replying.
 
-One lock serialises the work within a replica until a queue replaces it.
+Up to `PREPARE_CONCURRENCY` versions are read, chunked and staged at once, which
+bounds the S3 calls they make together. Writes to the index go to one batching
+writer per replica (`dispatch.BatchingDispatcher`) until a queue replaces it.
 Failures are logged and dropped; every step is idempotent, so the CMS retries.
+
+Requests no longer run strictly in arrival order. The applier keeps that safe:
+it never lets an older version replace a newer one, nor brings back a removed
+one, whichever order their jobs reach it in.
 """
 
 import asyncio
+import dataclasses
 import logging
 from collections.abc import Callable, Mapping
 from typing import Annotated
@@ -23,13 +30,27 @@ logger = logging.getLogger(__name__)
 
 FAILED_METRIC = "IngestionFailed"
 
+PREPARE_CONCURRENCY = 4
+
 Readers = Mapping[models.SourceType, sources.SourceReader]
+
+
+@dataclasses.dataclass(frozen=True)
+class IngestionState:
+    """What every request's service shares; `create_app` makes one per app."""
+
+    preparing: asyncio.Semaphore = dataclasses.field(
+        default_factory=lambda: asyncio.Semaphore(PREPARE_CONCURRENCY),
+    )
+    writes: dispatch.PendingWrites = dataclasses.field(
+        default_factory=dispatch.PendingWrites,
+    )
 
 
 class IngestionService:
     def __init__(
         self,
-        lock: asyncio.Lock,
+        preparing: asyncio.Semaphore,
         dispatcher: dispatch.ApplyDispatcher,
         preparer_for: Callable[[Readers], stages.Preparer],
         sections: section_store.SectionStore,
@@ -37,7 +58,7 @@ class IngestionService:
         strategy: str = index_schema.CHUNK_STRATEGY,
         count_failure: Callable[[], None] = lambda: None,
     ) -> None:
-        self._lock = lock
+        self._preparing = preparing
         self._dispatcher = dispatcher
         self._preparer_for = preparer_for
         self._sections = sections
@@ -52,27 +73,31 @@ class IngestionService:
         trace_id: str | None = None,
     ) -> None:
         """Prepares the version, then indexes it."""
-        async with self._lock:
-            try:
-                await self._index(job, reader)
-            except Exception:
-                self._failed("index", job.document_id, job.version_id, trace_id)
+        try:
+            await self._index(job, reader)
+        except Exception:
+            self._failed("index", job.document_id, job.version_id, trace_id)
 
     async def delete(self, job: jobs.RemoveJob, trace_id: str | None = None) -> None:
         """Takes the version out of the index, then deletes its staged files."""
-        async with self._lock:
-            try:
-                await self._dispatcher.dispatch(job)
+        try:
+            await self._dispatcher.dispatch(job)
+
+            async with self._preparing:
                 await self._sections.delete(job.document_id, job.version_id)
                 await self._chunk_sets.delete(
                     self._strategy, job.document_id, job.version_id
                 )
-            except Exception:
-                self._failed("delete", job.document_id, job.version_id, trace_id)
+        except Exception:
+            self._failed("delete", job.document_id, job.version_id, trace_id)
 
     async def _index(self, job: jobs.IndexJob, reader: sources.SourceReader) -> None:
         preparer = self._preparer_for({job.source_type: reader})
-        await self._dispatcher.dispatch(await preparer.prepare(job))
+
+        async with self._preparing:
+            apply_job = await preparer.prepare(job)
+
+        await self._dispatcher.dispatch(apply_job)
 
     def _failed(
         self,
@@ -91,29 +116,30 @@ class IngestionService:
         self._count_failure()
 
 
-def get_lock(request: fastapi.Request) -> asyncio.Lock:
-    """FastAPI dependency: the lock `create_app` made, shared by every request."""
-    lock: asyncio.Lock = request.app.state.ingestion_lock
-    return lock
+def get_state(request: fastapi.Request) -> IngestionState:
+    """FastAPI dependency: the state `create_app` made, shared by every request."""
+    state: IngestionState = request.app.state.ingestion
+    return state
 
 
 def get_service(
-    lock: Annotated[asyncio.Lock, fastapi.Depends(get_lock)],
+    state: Annotated[IngestionState, fastapi.Depends(get_state)],
     config: app_config.Config,
     client: s3.Client,
     index_builds: Annotated[
         builds.IndexBuildService, fastapi.Depends(builds.get_index_build_service)
     ],
 ) -> IngestionService:
-    """FastAPI dependency: a service per request, around the app's one lock."""
+    """FastAPI dependency: a service per request, around the app's shared state."""
 
     def preparer_for(readers: Readers) -> stages.Preparer:
         return document_preparer.from_config(config, client, readers)
 
     return IngestionService(
-        lock=lock,
-        dispatcher=dispatch.InProcessDispatcher(
-            document_applier.publisher(config, client, index_builds)
+        preparing=state.preparing,
+        dispatcher=dispatch.BatchingDispatcher(
+            state.writes,
+            document_applier.publisher(config, client, index_builds),
         ),
         preparer_for=preparer_for,
         sections=section_store.S3SectionStore(client, config.search_store_s3_bucket),

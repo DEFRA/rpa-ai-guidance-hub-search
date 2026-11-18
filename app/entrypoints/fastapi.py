@@ -1,4 +1,3 @@
-import asyncio
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -12,6 +11,7 @@ from app.common import mongo, s3, tracing
 from app.health import router as health_router
 from app.index import active_index, builds
 from app.ingestion import router as ingestion_router
+from app.ingestion import service as ingestion_service
 from app.search.v1 import router as search_v1_router
 
 logger = getLogger(__name__)
@@ -58,8 +58,8 @@ def create_app(
 
     if ingestion_mode is app_config.IngestionMode.HTTP:
         # One per app, so every request's ingestion service shares it
-        # (`ingestion.service.get_lock`).
-        app.state.ingestion_lock = asyncio.Lock()
+        # (`ingestion.service.get_state`).
+        app.state.ingestion = ingestion_service.IngestionState()
         app.include_router(ingestion_router.router)
 
     return app

@@ -1,4 +1,4 @@
-"""The service prepares, indexes and deletes one request at a time."""
+"""The service prepares a few requests at once, and hands each on to be written."""
 
 import asyncio
 import logging
@@ -85,7 +85,7 @@ def ingestion(calls, sections, staged, readers_seen, count_failure):
         return RecordingPreparer(calls)
 
     return service.IngestionService(
-        lock=asyncio.Lock(),
+        preparing=asyncio.Semaphore(2),
         dispatcher=RecordingDispatcher(calls),
         preparer_for=preparer_for,
         sections=sections,
@@ -166,52 +166,80 @@ class TestFailures:
         assert calls[-1] == ("dispatch", REMOVE)
 
 
-class TestOrdering:
-    async def test_runs_one_request_at_a_time_in_arrival_order(self, ingestion, calls):
+class TestConcurrency:
+    async def test_prepares_no_more_at_once_than_the_service_allows(
+        self, ingestion, calls
+    ):
         released = asyncio.Event()
-        dispatch = ingestion._dispatcher.dispatch
+        preparing = []
+        most = 0
+
+        class HeldPreparer:
+            async def prepare(self, job):
+                nonlocal most
+                preparing.append(job)
+                most = max(most, len(preparing))
+                await released.wait()
+                preparing.remove(job)
+                return _apply_job(job)
+
+        ingestion._preparer_for = lambda _: HeldPreparer()
+        tasks = [
+            asyncio.create_task(ingestion.index(guides.job(), object()))
+            for _ in range(5)
+        ]
+        await asyncio.sleep(0)
+
+        assert len(preparing) == 2
+
+        released.set()
+        await asyncio.gather(*tasks)
+
+        assert most == 2
+        assert [name for name, _ in calls] == ["dispatch"] * 5
+
+    async def test_dispatches_without_holding_a_place_to_prepare(
+        self, ingestion, calls
+    ):
+        released = asyncio.Event()
 
         async def held(job):
             calls.append(("started", job))
             await released.wait()
-            await dispatch(job)
 
         ingestion._dispatcher.dispatch = held
-        first = asyncio.create_task(ingestion.index(guides.job(), object()))
-        await asyncio.sleep(0)
-        second = asyncio.create_task(ingestion.delete(REMOVE))
-        await asyncio.sleep(0)
+        tasks = [
+            asyncio.create_task(ingestion.index(guides.job(), object()))
+            for _ in range(3)
+        ]
+        for _ in range(5):
+            await asyncio.sleep(0)
 
-        assert [name for name, _ in calls] == ["prepare", "started"]
+        # Two places to prepare, yet all three prepared while writes were held.
+        assert [name for name, _ in calls].count("prepare") == 3
 
         released.set()
-        await asyncio.gather(first, second)
-
-        assert [name for name, _ in calls] == [
-            "prepare",
-            "started",
-            "dispatch",
-            "started",
-            "dispatch",
-        ]
-        assert calls[-1] == ("dispatch", REMOVE)
+        await asyncio.gather(*tasks)
 
 
 class TestGetService:
-    def test_every_request_shares_the_apps_lock(self, mocker):
+    def test_every_request_shares_the_apps_state(self, mocker):
         app = entrypoint.create_app(app_config.IngestionMode.HTTP)
         request = mocker.Mock(app=app)
         config = app_config.get_config()
+        state = app.state.ingestion
 
         def built():
             return service.get_service(
-                service.get_lock(request), config, mocker.Mock(), mocker.Mock()
+                service.get_state(request), config, mocker.Mock(), mocker.Mock()
             )
 
         first, second = built(), built()
 
         assert first is not second
-        assert first._lock is second._lock is app.state.ingestion_lock
+        assert first._preparing is second._preparing is state.preparing
+        assert first._dispatcher._pending is second._dispatcher._pending
+        assert first._dispatcher._pending is state.writes
 
     def test_counts_failures_only_with_metrics_enabled(self, mocker):
         counter = mocker.patch("app.common.metrics.counter")
@@ -219,7 +247,7 @@ class TestGetService:
 
         def built(enable_metrics):
             return service.get_service(
-                asyncio.Lock(),
+                service.IngestionState(),
                 config.model_copy(update={"enable_metrics": enable_metrics}),
                 mocker.Mock(),
                 mocker.Mock(),

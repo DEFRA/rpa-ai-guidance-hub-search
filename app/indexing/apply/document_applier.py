@@ -11,17 +11,22 @@ it has applied or removed, even once no content is left, so a delayed or
 retried apply can't undo a newer version or a deletion. Every check reads the
 same copy of the index it changes.
 
-`publish` applies or removes a job against the shared index:
+`publish_all` applies or removes a batch of jobs against the shared index:
 
 1. download the active build into a temporary directory
-2. apply the staged chunks there, or remove the version
+2. apply each job's staged chunks there, or remove its version, in order
 3. if that changed the index, upload the result as a new build and make it active
+
+so a batch costs one download and one upload, however many jobs it holds. A job
+that fails in step 2 fails alone; the rest of the batch is still published.
+`publish` is a batch of one.
 """
 
+import dataclasses
 import logging
 import pathlib
 import tempfile
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING
 
 from app import config as app_config
@@ -151,16 +156,32 @@ def _is_jobs(staged: chunk_sets.ChunkSet, job: jobs.ApplyJob) -> bool:
     )
 
 
-async def publish(
-    job: jobs.WriteJob,
+@dataclasses.dataclass(frozen=True)
+class Published:
+    """What publishing a batch did.
+
+    `build_id` is the new active build, or `None` when the batch left the index
+    unchanged and nothing was uploaded. `errors` holds, for each job in order,
+    what it raised, or `None` when it was applied, removed or skipped.
+    """
+
+    build_id: builds.BuildId | None
+    errors: tuple[Exception | None, ...]
+
+
+PublishAll = Callable[[Sequence[jobs.WriteJob]], Awaitable[Published]]
+
+
+async def publish_all(
+    batch: Sequence[jobs.WriteJob],
     index_builds: builds.IndexBuildService,
     applier_for: Callable[[pathlib.Path], DocumentApplier],
-) -> builds.BuildId | None:
-    """Applies or removes against the active build and publishes the result.
+) -> Published:
+    """Applies or removes each job against the active build, then publishes once.
 
-    Returns the new active build, or `None` when the job left the index
-    unchanged, in which case nothing is uploaded. Raises `builds.LostSwapError`
-    if another build became active meanwhile.
+    Raises, failing the whole batch, if the active build can't be loaded or the
+    new one published: `builds.LostSwapError` if another build became active
+    meanwhile.
     """
     # Tantivy can still be touching files as the directory is removed. A failed
     # cleanup of scratch space must not replace the error that got us here.
@@ -171,36 +192,59 @@ async def publish(
         directory = pathlib.Path(work)
         base = await index_builds.load(directory)
         applier = applier_for(directory)
+        changed = False
+        errors: list[Exception | None] = []
 
-        match job:
-            case jobs.ApplyJob():
-                changed = await applier.apply(job)
-            case jobs.RemoveJob():
-                changed = await applier.remove(job)
+        for job in batch:
+            try:
+                changed = await _write(applier, job) or changed
+            except Exception as error:  # raised to the job's caller
+                errors.append(error)
+            else:
+                errors.append(None)
 
-        if not changed:
-            return None
-
-        return await index_builds.publish(directory, base)
+        build_id = await index_builds.publish(directory, base) if changed else None
+        return Published(build_id, tuple(errors))
 
 
-Publish = Callable[[jobs.WriteJob], Awaitable[builds.BuildId | None]]
+async def publish(
+    job: jobs.WriteJob,
+    index_builds: builds.IndexBuildService,
+    applier_for: Callable[[pathlib.Path], DocumentApplier],
+) -> builds.BuildId | None:
+    """`publish_all` of this one job, raising what it raised.
+
+    Returns the new active build, or `None` when the job left the index
+    unchanged.
+    """
+    published = await publish_all([job], index_builds, applier_for)
+    (error,) = published.errors
+
+    if error is not None:
+        raise error
+
+    return published.build_id
+
+
+async def _write(applier: DocumentApplier, job: jobs.WriteJob) -> bool:
+    match job:
+        case jobs.ApplyJob():
+            return await applier.apply(job)
+        case jobs.RemoveJob():
+            return await applier.remove(job)
 
 
 def publisher(
     config: app_config.AppConfig,
     client: S3Client,
     index_builds: builds.IndexBuildService,
-) -> Publish:
-    """`publish`, wired to the configured bucket and these builds."""
+) -> PublishAll:
+    """`publish_all`, wired to the configured bucket and these builds."""
 
-    def applier_for(index_dir: pathlib.Path) -> DocumentApplier:
-        return from_config(config, client, index_dir)
+    async def publish_batch(batch: Sequence[jobs.WriteJob]) -> Published:
+        return await publish_all(batch, index_builds, _applier_for(config, client))
 
-    async def publish_job(job: jobs.WriteJob) -> builds.BuildId | None:
-        return await publish(job, index_builds, applier_for)
-
-    return publish_job
+    return publish_batch
 
 
 async def publish_from_config(
@@ -211,7 +255,17 @@ async def publish_from_config(
     """`publish` for an entry point outside a request; connects to MongoDB."""
     database = await mongo.get_db(await mongo.get_mongo_client(config), config)
     index_builds = builds.get_index_build_service(database, config, client)
-    return await publisher(config, client, index_builds)(job)
+    return await publish(job, index_builds, _applier_for(config, client))
+
+
+def _applier_for(
+    config: app_config.AppConfig,
+    client: S3Client,
+) -> Callable[[pathlib.Path], DocumentApplier]:
+    def applier_for(index_dir: pathlib.Path) -> DocumentApplier:
+        return from_config(config, client, index_dir)
+
+    return applier_for
 
 
 def from_config(

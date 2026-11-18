@@ -37,12 +37,12 @@ def stack(floci_s3):
             staged, tantivy_index.TantivyChunkIndex(directory)
         )
 
-    async def publish(job):
-        return await document_applier.publish(job, index_builds, applier_for)
+    async def publish_all(batch):
+        return await document_applier.publish_all(batch, index_builds, applier_for)
 
     ingestion = service.IngestionService(
-        lock=asyncio.Lock(),
-        dispatcher=dispatch.InProcessDispatcher(publish),
+        preparing=asyncio.Semaphore(service.PREPARE_CONCURRENCY),
+        dispatcher=dispatch.BatchingDispatcher(dispatch.PendingWrites(), publish_all),
         preparer_for=preparer_for,
         sections=sections,
         chunk_sets=staged,
