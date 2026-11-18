@@ -7,13 +7,16 @@ Failures are logged and dropped; every step is idempotent, so the CMS retries.
 
 Requests no longer run strictly in arrival order. The applier keeps that safe:
 it never lets an older version replace a newer one, nor brings back a removed
-one, whichever order their jobs reach it in.
+one, whichever order their jobs reach it in. Requests for the same version still
+take turns (`VersionLocks`), so a PUT that is still preparing can't stage files
+again after a DELETE has cleaned them up.
 """
 
 import asyncio
+import contextlib
 import dataclasses
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from typing import Annotated
 
 import fastapi
@@ -35,6 +38,44 @@ PREPARE_CONCURRENCY = 4
 Readers = Mapping[models.SourceType, sources.SourceReader]
 
 
+VersionKey = tuple[ids.DocumentId, ids.VersionId | None]
+
+
+class VersionLocks:
+    """One lock per document version, kept only while something holds or wants it.
+
+    A source that mints its version ids while reading has no version id until
+    then, so its requests share the document's `None` key.
+    """
+
+    def __init__(self) -> None:
+        self._locks: dict[VersionKey, tuple[asyncio.Lock, int]] = {}
+
+    @contextlib.asynccontextmanager
+    async def hold(
+        self,
+        document_id: ids.DocumentId,
+        version_id: ids.VersionId | None,
+    ) -> AsyncIterator[None]:
+        key = (document_id, version_id)
+        lock, users = self._locks.get(key, (asyncio.Lock(), 0))
+        self._locks[key] = (lock, users + 1)
+
+        try:
+            async with lock:
+                yield
+        finally:
+            lock, users = self._locks[key]
+
+            if users == 1:
+                del self._locks[key]
+            else:
+                self._locks[key] = (lock, users - 1)
+
+    def __len__(self) -> int:
+        return len(self._locks)
+
+
 @dataclasses.dataclass(frozen=True)
 class IngestionState:
     """What every request's service shares; `create_app` makes one per app."""
@@ -45,12 +86,14 @@ class IngestionState:
     writes: dispatch.PendingWrites = dataclasses.field(
         default_factory=dispatch.PendingWrites,
     )
+    versions: VersionLocks = dataclasses.field(default_factory=VersionLocks)
 
 
 class IngestionService:
     def __init__(
         self,
         preparing: asyncio.Semaphore,
+        versions: VersionLocks,
         dispatcher: dispatch.ApplyDispatcher,
         preparer_for: Callable[[Readers], stages.Preparer],
         sections: section_store.SectionStore,
@@ -59,6 +102,7 @@ class IngestionService:
         count_failure: Callable[[], None] = lambda: None,
     ) -> None:
         self._preparing = preparing
+        self._versions = versions
         self._dispatcher = dispatcher
         self._preparer_for = preparer_for
         self._sections = sections
@@ -81,23 +125,26 @@ class IngestionService:
     async def delete(self, job: jobs.RemoveJob, trace_id: str | None = None) -> None:
         """Takes the version out of the index, then deletes its staged files."""
         try:
-            await self._dispatcher.dispatch(job)
+            async with self._versions.hold(job.document_id, job.version_id):
+                await self._dispatcher.dispatch(job)
 
-            async with self._preparing:
-                await self._sections.delete(job.document_id, job.version_id)
-                await self._chunk_sets.delete(
-                    self._strategy, job.document_id, job.version_id
-                )
+                async with self._preparing:
+                    await self._sections.delete(job.document_id, job.version_id)
+                    await self._chunk_sets.delete(
+                        self._strategy, job.document_id, job.version_id
+                    )
         except Exception:
             self._failed("delete", job.document_id, job.version_id, trace_id)
 
     async def _index(self, job: jobs.IndexJob, reader: sources.SourceReader) -> None:
         preparer = self._preparer_for({job.source_type: reader})
 
-        async with self._preparing:
-            apply_job = await preparer.prepare(job)
+        # The version's turn first, so no place to prepare is held waiting for it.
+        async with self._versions.hold(job.document_id, job.version_id):
+            async with self._preparing:
+                apply_job = await preparer.prepare(job)
 
-        await self._dispatcher.dispatch(apply_job)
+            await self._dispatcher.dispatch(apply_job)
 
     def _failed(
         self,
@@ -137,6 +184,7 @@ def get_service(
 
     return IngestionService(
         preparing=state.preparing,
+        versions=state.versions,
         dispatcher=dispatch.BatchingDispatcher(
             state.writes,
             document_applier.publisher(config, client, index_builds),

@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import uuid
 
 import pytest
 
@@ -9,7 +10,7 @@ from app import config as app_config
 from app.entrypoints import fastapi as entrypoint
 from app.indexing import jobs
 from app.ingestion import service
-from app.records import chunk_sets, models
+from app.records import chunk_sets, ids, models
 from tests.fakes import chunk_set_store as fake_chunk_set_store
 from tests.fakes import section_store as fake_section_store
 from tests.support import chunks as fixtures
@@ -21,6 +22,10 @@ REMOVE = jobs.RemoveJob(
     version_id=fixtures.VERSION_ID,
     occurred_at=fixtures.OCCURRED_AT,
 )
+
+
+def _version(n):
+    return ids.VersionId(uuid.UUID(f"0199b8a2-0000-7000-8000-{n:012d}"))
 
 
 def _apply_job(job):
@@ -86,6 +91,7 @@ def ingestion(calls, sections, staged, readers_seen, count_failure):
 
     return service.IngestionService(
         preparing=asyncio.Semaphore(2),
+        versions=service.VersionLocks(),
         dispatcher=RecordingDispatcher(calls),
         preparer_for=preparer_for,
         sections=sections,
@@ -185,8 +191,10 @@ class TestConcurrency:
 
         ingestion._preparer_for = lambda _: HeldPreparer()
         tasks = [
-            asyncio.create_task(ingestion.index(guides.job(), object()))
-            for _ in range(5)
+            asyncio.create_task(
+                ingestion.index(guides.job(version_id=_version(n)), object())
+            )
+            for n in range(5)
         ]
         await asyncio.sleep(0)
 
@@ -209,8 +217,10 @@ class TestConcurrency:
 
         ingestion._dispatcher.dispatch = held
         tasks = [
-            asyncio.create_task(ingestion.index(guides.job(), object()))
-            for _ in range(3)
+            asyncio.create_task(
+                ingestion.index(guides.job(version_id=_version(n)), object())
+            )
+            for n in range(3)
         ]
         for _ in range(5):
             await asyncio.sleep(0)
@@ -220,6 +230,71 @@ class TestConcurrency:
 
         released.set()
         await asyncio.gather(*tasks)
+
+
+class TestSameVersion:
+    async def test_a_delete_waits_for_the_versions_preparation(self, ingestion, calls):
+        released = asyncio.Event()
+
+        class HeldPreparer:
+            async def prepare(self, job):
+                calls.append(("prepare", job))
+                await released.wait()
+                return _apply_job(job)
+
+        job = guides.job()
+        remove = jobs.RemoveJob(
+            document_id=job.document_id,
+            version_id=job.version_id,
+            occurred_at=job.occurred_at,
+        )
+        ingestion._preparer_for = lambda _: HeldPreparer()
+        indexing = asyncio.create_task(ingestion.index(job, object()))
+        await asyncio.sleep(0)
+        deleting = asyncio.create_task(ingestion.delete(remove))
+        for _ in range(5):
+            await asyncio.sleep(0)
+
+        assert calls == [("prepare", job)]
+
+        released.set()
+        await asyncio.gather(indexing, deleting)
+
+        assert calls == [
+            ("prepare", job),
+            ("dispatch", _apply_job(job)),
+            ("dispatch", remove),
+        ]
+
+    async def test_other_versions_do_not_wait(self, ingestion, calls):
+        released = asyncio.Event()
+
+        async def held(job):
+            calls.append(("started", job))
+            if job.version_id == guides.VERSION_ID:
+                await released.wait()
+
+        ingestion._dispatcher.dispatch = held
+        indexing = asyncio.create_task(ingestion.index(guides.job(), object()))
+        await asyncio.sleep(0)
+
+        await asyncio.wait_for(
+            ingestion.index(guides.job(version_id=_version(9)), object()), 1
+        )
+        released.set()
+        await indexing
+
+        assert [name for name, _ in calls].count("prepare") == 2
+
+
+class TestVersionLocks:
+    async def test_forgets_a_version_once_nothing_holds_it(self):
+        locks = service.VersionLocks()
+
+        async with locks.hold(guides.DOCUMENT_ID, guides.VERSION_ID):
+            assert len(locks) == 1
+
+        assert len(locks) == 0
 
 
 class TestGetService:

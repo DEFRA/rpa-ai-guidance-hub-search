@@ -133,3 +133,47 @@ class TestDispatch:
         await dispatch.BatchingDispatcher(pending, publish).dispatch(_remove(2))
 
         assert publish.batches == [[_remove(2)]]
+
+
+class TestCancellation:
+    async def test_a_cancelled_caller_leaves_the_rest_of_its_batch(self):
+        publish = Publisher(fail={_remove(1)})
+        pending = dispatch.PendingWrites()
+        publish.release.clear()
+        first, second = (
+            asyncio.create_task(
+                dispatch.BatchingDispatcher(pending, publish).dispatch(_remove(n))
+            )
+            for n in (1, 2)
+        )
+        await _settle()
+
+        first.cancel()
+        await _settle()
+        publish.release.set()
+
+        assert await second is None
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        assert publish.batches == [[_remove(1), _remove(2)]]
+
+    async def test_publishes_a_job_whose_caller_was_cancelled(self):
+        publish = Publisher()
+        pending = dispatch.PendingWrites()
+        publish.release.clear()
+        held = asyncio.create_task(
+            dispatch.BatchingDispatcher(pending, publish).dispatch(_remove(1))
+        )
+        await _settle()
+        cancelled = asyncio.create_task(
+            dispatch.BatchingDispatcher(pending, publish).dispatch(_remove(2))
+        )
+        await _settle()
+
+        cancelled.cancel()
+        publish.release.set()
+        await held
+        await _settle()
+
+        assert publish.batches == [[_remove(1)], [_remove(2)]]
+        assert not pending.publishing

@@ -164,7 +164,33 @@ class TestApply:
         assert await _found(index, "orchards") == [random_id]
 
 
-class TestStaleApplies:
+class FailingWrites(fake_chunk_index.InMemoryChunkIndex):
+    async def replace_document(self, *_):
+        msg = "disk full"
+        raise OSError(msg)
+
+    async def remove_version(self, *_):
+        msg = "disk full"
+        raise OSError(msg)
+
+
+class TestFailedWrites:
+    async def test_a_failed_apply_is_an_index_write_error(self, staged):
+        chunk_set = _staged("Hold a holding number.")
+        await staged.put(chunk_set)
+        applier = document_applier.DocumentApplier(staged, FailingWrites(), STRATEGY)
+
+        with pytest.raises(document_applier.IndexWriteError) as raised:
+            await applier.apply(_job(chunk_set))
+
+        assert isinstance(raised.value.__cause__, OSError)
+
+    async def test_a_failed_removal_is_an_index_write_error(self, staged):
+        applier = document_applier.DocumentApplier(staged, FailingWrites(), STRATEGY)
+
+        with pytest.raises(document_applier.IndexWriteError):
+            await applier.remove(_remove())
+
     """A delayed or retried apply can't undo a newer version or a deletion."""
 
     async def test_refuses_an_older_version_after_the_newer_is_removed(
@@ -476,6 +502,33 @@ class TestPublish:
         assert applied is None
         await index_builds.load(tmp_path / "check")
         assert _documents_in(tmp_path / "check") == [str(SECOND_DOCUMENT_ID)]
+
+    async def test_publishes_nothing_when_a_write_fails_after_committing(
+        self,
+        index_builds,
+        staged,
+    ):
+        first_job = await _stage(staged, "Hold a holding number.")
+        failing_job = await _stage(staged, "Licences.", SECOND_DOCUMENT_ID)
+
+        class FailsAfterCommitting(tantivy_index.TantivyChunkIndex):
+            async def replace_document(self, header, chunks):
+                await super().replace_document(header, chunks)
+                if header.document_id == SECOND_DOCUMENT_ID:
+                    msg = "reload failed"
+                    raise RuntimeError(msg)
+
+        def applier_for(directory):
+            return document_applier.DocumentApplier(
+                staged, FailsAfterCommitting(directory), STRATEGY
+            )
+
+        with pytest.raises(document_applier.IndexWriteError):
+            await document_applier.publish_all(
+                [first_job, failing_job], index_builds, applier_for
+            )
+
+        assert await index_builds.active_build() is None
 
     async def test_publishes_no_build_for_a_batch_that_changed_nothing(
         self,

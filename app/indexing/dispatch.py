@@ -34,12 +34,14 @@ class PendingWrites:
     """Jobs waiting for the writer, and the writer's turn; one per process.
 
     Every `BatchingDispatcher` around the same `PendingWrites` shares one queue.
+    `publishing` holds the tasks that publish, which asyncio keeps only weakly.
     """
 
     jobs: list[tuple[jobs.WriteJob, asyncio.Future[None]]] = dataclasses.field(
         default_factory=list,
     )
     turn: asyncio.Lock = dataclasses.field(default_factory=asyncio.Lock)
+    publishing: set[asyncio.Task[None]] = dataclasses.field(default_factory=set)
 
 
 class BatchingDispatcher:
@@ -49,10 +51,12 @@ class BatchingDispatcher:
     changes, so a burst of N jobs costs one more publish rather than N. Jobs
     keep their arrival order within a batch.
 
-    Whichever caller gets the writer's turn publishes the batch, with its own
-    `publish_all`; every dispatcher must be wired to the same index. Each
-    caller still sees its own job's outcome: what the job raised, or what the
-    batch raised if it couldn't be published.
+    Each dispatch starts a task that waits for the writer's turn and publishes
+    whatever is waiting, with its dispatcher's `publish_all`; every dispatcher
+    must be wired to the same index. The task belongs to no caller, so a
+    cancelled caller stops waiting for its own job without cancelling the
+    batch it is in. Each caller sees its own job's outcome: what the job
+    raised, or what the batch raised if it couldn't be published.
 
     Safe only with one writer: nothing retries a lost build swap, so only one
     process may publish to an index.
@@ -66,12 +70,18 @@ class BatchingDispatcher:
         done: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         self._pending.jobs.append((job, done))
 
-        async with self._pending.turn:
-            if not done.done():
-                batch, self._pending.jobs = self._pending.jobs, []
-                await self._publish(batch)
+        task = asyncio.create_task(self._publish_waiting())
+        self._pending.publishing.add(task)
+        task.add_done_callback(self._pending.publishing.discard)
 
         await done
+
+    async def _publish_waiting(self) -> None:
+        async with self._pending.turn:
+            batch, self._pending.jobs = self._pending.jobs, []
+
+            if batch:
+                await self._publish(batch)
 
     async def _publish(
         self,
@@ -85,11 +95,19 @@ class BatchingDispatcher:
             raise
         except Exception as error:  # raised to every job's caller
             for _, done in batch:
-                done.set_exception(error)
+                _settle(done, error)
             return
 
         for (_, done), raised in zip(batch, result.errors, strict=True):
-            if raised is None:
-                done.set_result(None)
-            else:
-                done.set_exception(raised)
+            _settle(done, raised)
+
+
+def _settle(done: asyncio.Future[None], raised: Exception | None) -> None:
+    """Hands a job's outcome to its caller, unless the caller stopped waiting."""
+    if done.done():
+        return
+
+    if raised is None:
+        done.set_result(None)
+    else:
+        done.set_exception(raised)

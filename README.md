@@ -335,7 +335,9 @@ Each replica prepares up to 4 versions at once, and writes to the index in
 batches: whatever arrives while one batch is being published goes in the next,
 so a burst of requests costs one more upload of the index rather than one each.
 Requests may finish out of arrival order; an older version never replaces a
-newer one, nor brings back a deleted one. A failure is logged and counted
+newer one, nor brings back a deleted one. Requests for the same version take
+turns. A job that fails before writing fails alone; a failed write fails its
+whole batch, which publishes nothing. A failure is logged and counted
 (`IngestionFailed`, with `ENABLE_METRICS`), not retried: resending the same request
 is always safe.
 

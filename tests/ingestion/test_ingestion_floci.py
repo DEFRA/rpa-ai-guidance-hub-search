@@ -42,6 +42,7 @@ def stack(floci_s3):
 
     ingestion = service.IngestionService(
         preparing=asyncio.Semaphore(service.PREPARE_CONCURRENCY),
+        versions=service.VersionLocks(),
         dispatcher=dispatch.BatchingDispatcher(dispatch.PendingWrites(), publish_all),
         preparer_for=preparer_for,
         sections=sections,

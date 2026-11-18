@@ -18,8 +18,10 @@ same copy of the index it changes.
 3. if that changed the index, upload the result as a new build and make it active
 
 so a batch costs one download and one upload, however many jobs it holds. A job
-that fails in step 2 fails alone; the rest of the batch is still published.
-`publish` is a batch of one.
+that fails in step 2 before writing (nothing staged, the wrong chunks, a failed
+read) fails alone; the rest of the batch is still published. A failed write
+fails the whole batch and publishes nothing, because Tantivy may have committed
+some of it, and the jobs' callers retry. `publish` is a batch of one.
 """
 
 import dataclasses
@@ -47,6 +49,10 @@ class ChunkSetNotFoundError(LookupError):
 
 class ChunkSetMismatchError(ValueError):
     """The staged chunks aren't what the job, or the index, expects."""
+
+
+class IndexWriteError(RuntimeError):
+    """Writing to the index failed, and may have changed it in part."""
 
 
 class DocumentApplier:
@@ -96,7 +102,10 @@ class DocumentApplier:
             )
             return False
 
-        await self._writer.replace_document(header, staged.chunks)
+        try:
+            await self._writer.replace_document(header, staged.chunks)
+        except Exception as error:
+            raise IndexWriteError(job.document_id, job.version_id) from error
 
         logger.info(
             "Applied %s version %s (%s): %d %s chunks",
@@ -125,7 +134,10 @@ class DocumentApplier:
             )
             return False
 
-        await self._writer.remove_version(job.document_id, job.version_id)
+        try:
+            await self._writer.remove_version(job.document_id, job.version_id)
+        except Exception as error:
+            raise IndexWriteError(job.document_id, job.version_id) from error
 
         logger.info("Removed %s version %s", job.document_id, job.version_id)
         return True
@@ -179,9 +191,9 @@ async def publish_all(
 ) -> Published:
     """Applies or removes each job against the active build, then publishes once.
 
-    Raises, failing the whole batch, if the active build can't be loaded or the
-    new one published: `builds.LostSwapError` if another build became active
-    meanwhile.
+    Raises, failing the whole batch, if the active build can't be loaded, a
+    write fails (`IndexWriteError`), or the new build can't be published:
+    `builds.LostSwapError` if another build became active meanwhile.
     """
     # Tantivy can still be touching files as the directory is removed. A failed
     # cleanup of scratch space must not replace the error that got us here.
@@ -198,6 +210,8 @@ async def publish_all(
         for job in batch:
             try:
                 changed = await _write(applier, job) or changed
+            except IndexWriteError:
+                raise
             except Exception as error:  # raised to the job's caller
                 errors.append(error)
             else:
