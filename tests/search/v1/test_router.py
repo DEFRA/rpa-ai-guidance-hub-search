@@ -1,11 +1,13 @@
 """`GET /v1/search` over HTTP: the spike's routes and its result JSON."""
 
+import logging
 import uuid
 
 import fastapi.testclient
 import pytest
 
 import app.entrypoints.fastapi
+from app.common import log_utils
 from app.index import active_index
 from app.records import models
 from app.search import service
@@ -213,6 +215,34 @@ class TestBadRequests:
     )
     def test_are_refused(self, client, params):
         assert client.get("/v1/search", params=params).status_code == 422
+
+
+class TestTheRequestLogs:
+    """What a person typed never reaches the logs, even in the request's URL."""
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            pytest.param({"q": "Jo Bloggs land"}, id="words"),
+            pytest.param({"q": "Jo Bloggs land", "group": "document"}, id="documents"),
+            pytest.param({"title": "Jo Bloggs Claims"}, id="titles"),
+        ],
+    )
+    def test_never_hold_the_search_text(self, client, caplog, params):
+        caplog.set_level(logging.INFO)
+        caplog.handler.addFilter(log_utils.ExtraFieldsFilter())
+
+        assert client.get("/v1/search", params=params).status_code == 200
+
+        search_records = [r for r in caplog.records if r.name.startswith("app.search")]
+        assert search_records
+        assert all("[redacted]" in record.url["full"] for record in search_records)
+        # The test client's own httpx log line is the caller's, not the service's.
+        service_records = [r for r in caplog.records if not r.name.startswith("httpx")]
+        assert not any(
+            "Bloggs" in record.getMessage() or "Bloggs" in str(vars(record))
+            for record in service_records
+        )
 
 
 class TestTheUnversionedPath:

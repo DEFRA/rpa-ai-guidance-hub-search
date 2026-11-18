@@ -1,8 +1,7 @@
 """`GET /v1/search`: word search across documents or inside one, by section or
 grouped by document, and title search.
 
-Every caller is a Viewer for now, so only published documents are found. Service
-tokens and the role header come later.
+Only published documents are found for now.
 """
 
 import enum
@@ -12,14 +11,15 @@ from typing import Annotated
 import fastapi
 
 from app.index import active_index, chunk_index
-from app.search import keyword_search, routing, service
+from app.records import models
+from app.search import keyword_search, service
 from app.search.v1 import schemas
 
 router = fastapi.APIRouter(prefix="/v1", tags=["search"])
 
 _MAX_QUERY_LENGTH = 500
 _MAX_SECTIONS_PER_DOCUMENT = 20
-_ROLE = routing.Role.VIEWER
+_STATUSES = frozenset({models.DocumentStatus.PUBLISHED})
 
 
 class Grouping(enum.StrEnum):
@@ -36,11 +36,6 @@ def get_search_service(
 
 @router.get(
     "/search",
-    response_model=(
-        schemas.WordSearchResponse
-        | schemas.DocumentSearchResponse
-        | schemas.TitleSearchResponse
-    ),
     summary="Search documents by words, or by title",
 )
 async def search(
@@ -101,7 +96,7 @@ async def search(
 
     if title is not None:
         titles = await search_service.search_titles(
-            service.TitleSearch(text=title, role=_ROLE, limit=limit),
+            service.TitleSearch(text=title, statuses=_STATUSES, limit=limit),
         )
         return schemas.TitleSearchResponse.from_model(titles)
 
@@ -110,7 +105,7 @@ async def search(
             search_service,
             service.DocumentSearch(
                 text=q or "",
-                role=_ROLE,
+                statuses=_STATUSES,
                 tag=tag,
                 limit=limit,
                 offset=offset,
@@ -122,7 +117,7 @@ async def search(
         words = await search_service.search_words(
             service.WordSearch(
                 text=q or "",
-                role=_ROLE,
+                statuses=_STATUSES,
                 tag=tag,
                 limit=limit,
                 offset=offset,

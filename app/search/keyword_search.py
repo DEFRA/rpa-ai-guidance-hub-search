@@ -60,7 +60,7 @@ class KeywordSearch:
         hits = await self._index.search(
             chunk_index.ChunkQuery(
                 text=request.text,
-                statuses=routing.statuses_for(request.role),
+                statuses=request.statuses,
                 tag=request.tag,
                 # Every match: past `MAX_MATCHES` (at most `MAX_LIMIT`) none
                 # are served anyway.

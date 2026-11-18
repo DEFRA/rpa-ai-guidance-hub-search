@@ -24,29 +24,40 @@ FORBIDDEN = {
 }
 
 
-def _modules(path: pathlib.Path) -> set[str]:
-    tree = ast.parse(path.read_text(), filename=str(path))
+def _modules_in(source: str) -> set[str]:
+    """Every module `source` imports, and, for a `from` import, each name it
+    takes too, as it may be a module: `from app import search` is `app.search`.
+    """
     names: set[str] = set()
 
-    for node in ast.walk(tree):
+    for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Import):
             names.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             names.add(node.module)
+            names.update(f"{node.module}.{alias.name}" for alias in node.names)
 
     return names
+
+
+def _modules(path: pathlib.Path) -> set[str]:
+    return _modules_in(path.read_text())
 
 
 def _imports(path: pathlib.Path) -> set[str]:
     return {name.split(".")[0] for name in _modules(path)}
 
 
-def _imports_any(path: pathlib.Path, packages: set[str]) -> bool:
+def _names_any(names: set[str], packages: set[str]) -> bool:
     return any(
         name == package or name.startswith(f"{package}.")
-        for name in _modules(path)
+        for name in names
         for package in packages
     )
+
+
+def _imports_any(path: pathlib.Path, packages: set[str]) -> bool:
+    return _names_any(_modules(path), packages)
 
 
 class TestTheTantivyImports:
@@ -76,3 +87,36 @@ class TestTheDomainImports:
 
     def test_check_finds_a_domain_import(self):
         assert _imports_any(APP / "search" / "service.py", {"app.index"})
+
+    @pytest.mark.parametrize(
+        ("source", "package"),
+        [
+            pytest.param("import app.search.service", "app.search", id="import"),
+            pytest.param(
+                "from app.search import service", "app.search", id="from-module"
+            ),
+            pytest.param("from app import search", "app.search", id="from-package"),
+            pytest.param(
+                "from app.indexing import apply",
+                "app.indexing.apply",
+                id="from-subpackage",
+            ),
+            pytest.param(
+                "from app.indexing import apply as applying",
+                "app.indexing.apply",
+                id="aliased",
+            ),
+        ],
+    )
+    def test_check_finds_every_form_of_import(self, source, package):
+        assert _names_any(_modules_in(source), {package})
+
+    @pytest.mark.parametrize(
+        ("source", "package"),
+        [
+            pytest.param("from app import index", "app.indexing", id="prefix"),
+            pytest.param("from app.indexing import prepare", "app.indexing.apply"),
+        ],
+    )
+    def test_check_passes_other_imports(self, source, package):
+        assert not _names_any(_modules_in(source), {package})

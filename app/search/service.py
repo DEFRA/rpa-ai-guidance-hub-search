@@ -37,7 +37,7 @@ class DocumentSearch:
     """
 
     text: str
-    role: routing.Role
+    statuses: frozenset[models.DocumentStatus]
     tag: uuid.UUID | None = None
     limit: int = 10
     offset: int = 0

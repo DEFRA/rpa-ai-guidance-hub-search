@@ -123,8 +123,8 @@ OTHER = fixtures.document(
 )
 
 
-def _documents(text, role=routing.Role.VIEWER, **page):
-    return service.DocumentSearch(text=text, role=role, **page)
+def _documents(text, statuses=PUBLISHED_ONLY, **page):
+    return service.DocumentSearch(text=text, statuses=statuses, **page)
 
 
 class TestSearchingDocuments:
@@ -191,8 +191,10 @@ class TestSearchingDocuments:
     async def test_refuses_more_than_the_most_matches(self, mocker, search):
         mocker.patch.object(service, "MAX_MATCHES", 3)
 
+        request = _documents("livestock")
+
         with pytest.raises(service.TooManyMatchesError) as raised:
-            await search.search_documents(_documents("livestock"))
+            await search.search_documents(request)
 
         assert raised.value.total == 4
 
