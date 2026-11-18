@@ -142,6 +142,7 @@ class TestDocumentSearch:
             "versionId": str(header.version_id),
             "status": "published",
             "url": f"/guides/{header.document_id}",
+            "titleMatch": None,
             "sectionTotal": 2,
         }
         (section,) = document["sections"]
@@ -157,6 +158,28 @@ class TestDocumentSearch:
         (document,) = response.json()["results"]
         assert [section["heading"] for section in document["sections"]] == ["Scope"]
 
+    def test_gives_the_title_the_words_cover_apart(self, client):
+        response = client.get(
+            "/v1/search",
+            params={"q": "claims guidance", "group": "document"},
+        )
+
+        body = response.json()
+        assert (body["total"], body["documentTotal"], body["results"]) == (0, 1, [])
+        (title,) = body["titles"]
+        assert (title["documentTitle"], title["sections"]) == ("Claims Guidance", [])
+        assert title["titleMatch"] == {
+            "snippet": [{"text": "Claims Guidance", "match": True}],
+        }
+
+    def test_gives_no_titles_for_part_of_a_title(self, client):
+        response = client.get(
+            "/v1/search",
+            params={"q": "guidance", "group": "document"},
+        )
+
+        assert response.json()["titles"] == []
+
     def test_says_when_there_are_too_many_matches(self, client, mocker):
         mocker.patch.object(service, "MAX_MATCHES", 0)
 
@@ -166,8 +189,10 @@ class TestDocumentSearch:
         assert response.json() | {"queryId": "x"} == {
             "queryId": "x",
             "total": 0,
+            "documentTotal": 0,
             "sectionTotal": 1,
             "results": [],
+            "titles": [],
             "tooManyMatches": True,
             "message": "Too many matches. Be more specific.",
         }

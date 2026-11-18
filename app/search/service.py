@@ -6,7 +6,7 @@ import uuid
 from typing import Protocol
 
 from app.index import chunk_index
-from app.records import models
+from app.records import ids, models
 
 MAX_MATCHES = 1000
 
@@ -33,7 +33,8 @@ class WordSearch:
 class DocumentSearch:
     """Word search answered by document: `limit` and `offset` count documents.
 
-    Each document gives at most `sections` of its matching sections.
+    Each gives at most `sections` of its matching sections. The titles the
+    words cover are found too (`title_cover`).
     """
 
     text: str
@@ -74,24 +75,41 @@ class WordResults:
 
 @dataclasses.dataclass(frozen=True)
 class DocumentResult:
-    """One document's matching sections, best first.
+    """One document holding the words in its sections, or whose title they
+    cover, or both.
 
-    `sections` is never empty; its first is the document's best section.
-    `section_total` counts every one of its matching sections.
+    `sections` are its matching sections, best first; empty when only its
+    title is covered. `section_total` counts every one of its matching
+    sections. `title_match` is set when the words cover its title.
     """
 
+    document_id: ids.DocumentId
+    version_id: ids.VersionId
+    title: str
+    status: models.DocumentStatus
+    url: str
     sections: tuple[SectionResult, ...]
     section_total: int
+    title_match: chunk_index.TitleCoverHit | None = None
 
 
 @dataclasses.dataclass(frozen=True)
 class DocumentResults:
-    """`total` counts every matching document, `section_total` their sections."""
+    """A page of the documents whose sections hold the words, and every title
+    they cover.
+
+    `total` counts the documents paged through, `section_total` every matching
+    section. `titles` are the documents whose title the words cover, most
+    covered first; when there is only one it is left out of `results` and
+    `total`. `document_total` counts every document in either.
+    """
 
     query_id: str
     total: int
     section_total: int
     results: tuple[DocumentResult, ...]
+    titles: tuple[DocumentResult, ...] = ()
+    document_total: int = 0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -106,7 +124,7 @@ class SearchService(Protocol):
         ...
 
     async def search_documents(self, request: DocumentSearch) -> DocumentResults:
-        """Documents ordered by their best section.
+        """Documents by their best section, and the titles the words cover.
 
         Raises `TooManyMatchesError` past `MAX_MATCHES` sections.
         """

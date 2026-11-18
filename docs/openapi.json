@@ -38,7 +38,7 @@
         "type": "object"
       },
       "DocumentResult": {
-        "description": "One document holding the words, with its best sections.",
+        "description": "One document holding the words in its sections, or whose title they\ncover, or both.",
         "properties": {
           "documentId": {
             "format": "uuid",
@@ -55,7 +55,7 @@
             "type": "integer"
           },
           "sections": {
-            "description": "At most `sections` of them, best first",
+            "description": "At most `sections` of them, best first; empty when only the title is covered",
             "items": {
               "$ref": "#/components/schemas/SectionResult"
             },
@@ -64,6 +64,17 @@
           },
           "status": {
             "$ref": "#/components/schemas/DocumentStatus"
+          },
+          "titleMatch": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TitleMatch"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when the words cover the document's title: every query word is in it, and the query is most of it or its start"
           },
           "url": {
             "description": "Where a reader views the document",
@@ -91,6 +102,12 @@
       "DocumentSearchResponse": {
         "description": "Word search with `group=document`: a page of documents, best first.",
         "properties": {
+          "documentTotal": {
+            "default": 0,
+            "description": "Every document whose sections hold the words or whose title they cover",
+            "title": "Documenttotal",
+            "type": "integer"
+          },
           "message": {
             "anyOf": [
               {
@@ -107,6 +124,7 @@
             "type": "string"
           },
           "results": {
+            "description": "The documents whose sections hold the words, by their best section. When `titles` has just one, it is left out of these",
             "items": {
               "$ref": "#/components/schemas/DocumentResult"
             },
@@ -118,13 +136,21 @@
             "title": "Sectiontotal",
             "type": "integer"
           },
+          "titles": {
+            "description": "Every document whose title the words cover, most covered first, at most 50; the same on every page",
+            "items": {
+              "$ref": "#/components/schemas/DocumentResult"
+            },
+            "title": "Titles",
+            "type": "array"
+          },
           "tooManyMatches": {
             "default": false,
             "title": "Toomanymatches",
             "type": "boolean"
           },
           "total": {
-            "description": "Every matching document, not just this page; 0 when there are too many matches",
+            "description": "Every document `results` pages through, not just this page; 0 when there are too many matches",
             "title": "Total",
             "type": "integer"
           }
@@ -468,6 +494,24 @@
         "title": "SourceType",
         "type": "string"
       },
+      "TitleMatch": {
+        "description": "Where the words are in a document's title, which they cover.",
+        "properties": {
+          "snippet": {
+            "description": "The whole title, the query's words marked",
+            "items": {
+              "$ref": "#/components/schemas/SnippetPart"
+            },
+            "title": "Snippet",
+            "type": "array"
+          }
+        },
+        "required": [
+          "snippet"
+        ],
+        "title": "TitleMatch",
+        "type": "object"
+      },
       "TitleResult": {
         "properties": {
           "documentId": {
@@ -803,7 +847,7 @@
             }
           },
           {
-            "description": "`document` answers word search with a page of documents, each with its best sections; `limit` and `offset` then count documents",
+            "description": "`document` answers word search with a page of documents whose sections hold the words, each with its best sections, and the documents whose title the words cover; `limit` and `offset` then count documents",
             "in": "query",
             "name": "group",
             "required": false,
@@ -816,7 +860,7 @@
                   "type": "null"
                 }
               ],
-              "description": "`document` answers word search with a page of documents, each with its best sections; `limit` and `offset` then count documents",
+              "description": "`document` answers word search with a page of documents whose sections hold the words, each with its best sections, and the documents whose title the words cover; `limit` and `offset` then count documents",
               "title": "Group"
             }
           },

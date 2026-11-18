@@ -3,7 +3,9 @@
 The fields start from the milestone 1 spike's keyword result: `documentId`,
 `documentTitle`, `sectionNumber`, `heading`, `matches` and `snippet`. These are
 added: `id` (the section ID), `versionId`, `anchor`, `url`, `status`,
-`exact`, `total`, `queryId` and the "Too many matches" answer.
+`exact`, `total`, `queryId` and the "Too many matches" answer. Grouped by
+document, the answer also gives the documents whose title the words cover
+(`titles`, each with `titleMatch`) and counts every document (`documentTotal`).
 
 Within v1, changes must be additive. A breaking change is a new `v2` module
 with its own router, converting from the same version-neutral `service` models,
@@ -107,31 +109,55 @@ class WordSearchResponse(_Schema):
         )
 
 
+class TitleMatch(_Schema):
+    """Where the words are in a document's title, which they cover."""
+
+    snippet: list[SnippetPart] = pydantic.Field(
+        description="The whole title, the query's words marked",
+    )
+
+    @classmethod
+    def from_model(cls, hit: chunk_index.TitleCoverHit) -> TitleMatch:
+        return cls(
+            snippet=snippet_of(service.Excerpt(text=hit.title, matches=hit.matches)),
+        )
+
+
 class DocumentResult(_Schema):
-    """One document holding the words, with its best sections."""
+    """One document holding the words in its sections, or whose title they
+    cover, or both."""
 
     document_id: uuid.UUID
     document_title: str
     version_id: uuid.UUID
     status: models.DocumentStatus
     url: str = pydantic.Field(description="Where a reader views the document")
+    title_match: TitleMatch | None = pydantic.Field(
+        default=None,
+        description="Set when the words cover the document's title: every "
+        "query word is in it, and the query is most of it or its start",
+    )
     section_total: int = pydantic.Field(
         description="Every matching section in the document, not just those given",
     )
     sections: list[SectionResult] = pydantic.Field(
-        description="At most `sections` of them, best first",
+        description="At most `sections` of them, best first; empty when only "
+        "the title is covered",
     )
 
     @classmethod
     def from_model(cls, result: service.DocumentResult) -> DocumentResult:
-        best = result.sections[0].hit
-
         return cls(
-            document_id=best.document_id,
-            document_title=best.title,
-            version_id=best.version_id,
-            status=best.status,
-            url=best.url,
+            document_id=result.document_id,
+            document_title=result.title,
+            version_id=result.version_id,
+            status=result.status,
+            url=result.url,
+            title_match=(
+                TitleMatch.from_model(result.title_match)
+                if result.title_match is not None
+                else None
+            ),
             section_total=result.section_total,
             sections=[SectionResult.from_model(section) for section in result.sections],
         )
@@ -142,13 +168,26 @@ class DocumentSearchResponse(_Schema):
 
     query_id: str
     total: int = pydantic.Field(
-        description="Every matching document, not just this page; 0 when there "
-        "are too many matches",
+        description="Every document `results` pages through, not just this page; "
+        "0 when there are too many matches",
+    )
+    document_total: int = pydantic.Field(
+        default=0,
+        description="Every document whose sections hold the words or whose title "
+        "they cover",
     )
     section_total: int = pydantic.Field(
         description="Every matching section, across every document",
     )
-    results: list[DocumentResult]
+    results: list[DocumentResult] = pydantic.Field(
+        description="The documents whose sections hold the words, by their best "
+        "section. When `titles` has just one, it is left out of these",
+    )
+    titles: list[DocumentResult] = pydantic.Field(
+        default_factory=list,
+        description="Every document whose title the words cover, most covered "
+        "first, at most 50; the same on every page",
+    )
     too_many_matches: bool = False
     message: str | None = None
 
@@ -157,8 +196,10 @@ class DocumentSearchResponse(_Schema):
         return cls(
             query_id=results.query_id,
             total=results.total,
+            document_total=results.document_total,
             section_total=results.section_total,
             results=[DocumentResult.from_model(result) for result in results.results],
+            titles=[DocumentResult.from_model(result) for result in results.titles],
         )
 
     @classmethod

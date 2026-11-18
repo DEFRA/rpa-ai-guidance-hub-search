@@ -61,8 +61,10 @@ async def search(
     group: Annotated[
         Grouping | None,
         fastapi.Query(
-            description="`document` answers word search with a page of documents, "
-            "each with its best sections; `limit` and `offset` then count documents",
+            description="`document` answers word search with a page of documents "
+            "whose sections hold the words, each with its best sections, and the "
+            "documents whose title the words cover; `limit` and `offset` then "
+            "count documents",
         ),
     ] = None,
     sections: Annotated[

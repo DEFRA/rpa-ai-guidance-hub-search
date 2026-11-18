@@ -15,6 +15,15 @@ class TestFindingAQuery:
             pytest.param("of", "Proof of it.", ((6, 8),), id="short-whole-word"),
             pytest.param("", "Anything.", (), id="empty"),
             pytest.param("(rows*", "Hedge (rows*.", ((6, 12),), id="literal"),
+            pytest.param("AB1", "AB12 and AB1.", ((9, 12),), id="code-whole"),
+            pytest.param("B12", "AB12.", (), id="code-not-inside"),
+            pytest.param(
+                "ab12", "(AB12) or AB12-x", ((1, 5), (10, 14)), id="code-edges"
+            ),
+            pytest.param(
+                "land AB1", "Land AB12, land AB1", ((11, 19),), id="code-phrase"
+            ),
+            pytest.param("AB12,", "AB12, AB12x", ((0, 5),), id="code-punctuation"),
         ],
     )
     def test_gives_each_match_start_and_end(self, query, text, spans):
@@ -28,6 +37,10 @@ class TestTheTypoBudget:
     )
     def test_grows_with_the_word(self, word, budget):
         assert word_match.typo_budget(word) == budget
+
+    @pytest.mark.parametrize("word", ["ab1", "ab12", "op3", "2026", "sfi2023"])
+    def test_never_forgives_a_code(self, word):
+        assert word_match.typo_budget(word) == 0
 
 
 class TestFindingANearMatch:

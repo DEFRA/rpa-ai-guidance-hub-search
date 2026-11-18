@@ -4,6 +4,7 @@ import logging
 import uuid
 
 from app.index import chunk_index
+from app.records import ids
 from app.search import excerpts, service
 
 logger = logging.getLogger(__name__)
@@ -52,56 +53,65 @@ class KeywordSearch:
     ) -> service.DocumentResults:
         """Groups every matching section by document, then pages the documents.
 
-        A document ranks where its best section does. The index gives hits best
-        first, so grouping in order of first appearance keeps that order.
-        Excerpts are made only for the sections given back.
+        The index gives hits best first, so grouping in order of first
+        appearance ranks a document where its best section does. The titles
+        the words cover are given apart; when there is just one, its document
+        is left out of the pages, so it is never shown twice. Excerpts are made
+        only for the sections given back.
         """
         query_id = _query_id()
-        hits = await self._index.search(
-            chunk_index.ChunkQuery(
-                text=request.text,
-                statuses=request.statuses,
-                tag=request.tag,
-                # Every match: past `MAX_MATCHES` (at most `MAX_LIMIT`) none
-                # are served anyway.
-                limit=chunk_index.MAX_LIMIT,
-            ),
+        query = chunk_index.ChunkQuery(
+            text=request.text,
+            statuses=request.statuses,
+            tag=request.tag,
+            # Every match: past `MAX_MATCHES` (at most `MAX_LIMIT`) none are
+            # served anyway.
+            limit=chunk_index.MAX_LIMIT,
         )
+        hits = await self._index.search(query)
 
         if hits.total > service.MAX_MATCHES:
             raise service.TooManyMatchesError(query_id, hits.total)
 
-        by_document: dict[uuid.UUID, list[chunk_index.SectionHit]] = {}
+        titles = {
+            hit.document_id: hit for hit in await self._index.search_title_covers(query)
+        }
+        by_document: dict[ids.DocumentId, list[chunk_index.SectionHit]] = {}
 
         for hit in hits.hits:
             by_document.setdefault(hit.document_id, []).append(hit)
 
-        documents = list(by_document.values())
+        promoted = set(titles) if len(titles) == 1 else set()
+        documents = [
+            document_id for document_id in by_document if document_id not in promoted
+        ]
         page = documents[request.offset : request.offset + request.limit]
         logger.info(
-            "Document search %s found %d sections in %d documents; returned %s",
+            "Document search %s found %d sections in %d documents and %d titles; "
+            "returned %s",
             query_id,
             hits.total,
-            len(documents),
-            [(str(sections[0].document_id), len(sections)) for sections in page],
+            len(by_document),
+            len(titles),
+            [(str(document_id), len(by_document[document_id])) for document_id in page],
         )
 
         return service.DocumentResults(
             query_id=query_id,
             total=len(documents),
+            document_total=len(by_document.keys() | titles.keys()),
             section_total=hits.total,
             results=tuple(
-                service.DocumentResult(
-                    sections=tuple(
-                        service.SectionResult(
-                            hit=hit,
-                            excerpt=excerpts.of_hit(request.text, hit),
-                        )
-                        for hit in sections[: request.sections]
-                    ),
-                    section_total=len(sections),
+                _document_result(
+                    request,
+                    titles.get(document_id),
+                    by_document[document_id],
                 )
-                for sections in page
+                for document_id in page
+            ),
+            titles=tuple(
+                _document_result(request, title, by_document.get(document_id, []))
+                for document_id, title in titles.items()
             ),
         )
 
@@ -120,6 +130,30 @@ class KeywordSearch:
             [(str(hit.document_id), round(hit.score, 3)) for hit in hits],
         )
         return service.TitleResults(query_id=query_id, results=tuple(hits))
+
+
+def _document_result(
+    request: service.DocumentSearch,
+    title: chunk_index.TitleCoverHit | None,
+    sections: list[chunk_index.SectionHit],
+) -> service.DocumentResult:
+    """A title with no sections is still a document: `title` or `sections`
+    is always given."""
+    document = title or sections[0]
+
+    return service.DocumentResult(
+        document_id=document.document_id,
+        version_id=document.version_id,
+        title=document.title,
+        status=document.status,
+        url=document.url,
+        sections=tuple(
+            service.SectionResult(hit=hit, excerpt=excerpts.of_hit(request.text, hit))
+            for hit in sections[: request.sections]
+        ),
+        section_total=len(sections),
+        title_match=title,
+    )
 
 
 def _query_id() -> str:

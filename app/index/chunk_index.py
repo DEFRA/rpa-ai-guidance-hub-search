@@ -9,6 +9,7 @@ from app.matching import word_match
 from app.records import ids, models
 
 MAX_LIMIT = 1000
+MAX_TITLE_COVERS = 50
 
 
 def typo_budget(word: str) -> int:
@@ -107,6 +108,22 @@ class TitleHit:
     score: float
 
 
+@dataclasses.dataclass(frozen=True)
+class TitleCoverHit:
+    """A document whose title the words of a `ChunkQuery` cover, as
+    `title_cover` decides. `coverage` is the share of the title's words the
+    query holds; `matches` are offsets into `title`.
+    """
+
+    document_id: ids.DocumentId
+    version_id: ids.VersionId
+    title: str
+    status: models.DocumentStatus
+    url: str
+    coverage: float
+    matches: tuple[tuple[int, int], ...]
+
+
 class ChunkWriter(Protocol):
     async def replace_document(
         self,
@@ -163,6 +180,13 @@ class ChunkRetriever(Protocol):
 class TitleRetriever(Protocol):
     async def search_titles(self, query: TitleQuery) -> list[TitleHit]:
         """Closest first, at most `query.limit`."""
+        ...
+
+    async def search_title_covers(self, query: ChunkQuery) -> list[TitleCoverHit]:
+        """The titles the query's words cover, most covered first, then by
+        title; at most `MAX_TITLE_COVERS`. Honours `statuses` and `tag`;
+        ignores `limit` and `offset`.
+        """
         ...
 
 
