@@ -179,18 +179,22 @@ class TestFailedWrites:
         chunk_set = _staged("Hold a holding number.")
         await staged.put(chunk_set)
         applier = document_applier.DocumentApplier(staged, FailingWrites(), STRATEGY)
+        job = _job(chunk_set)
 
         with pytest.raises(document_applier.IndexWriteError) as raised:
-            await applier.apply(_job(chunk_set))
+            await applier.apply(job)
 
         assert isinstance(raised.value.__cause__, OSError)
 
     async def test_a_failed_removal_is_an_index_write_error(self, staged):
         applier = document_applier.DocumentApplier(staged, FailingWrites(), STRATEGY)
+        job = _remove()
 
         with pytest.raises(document_applier.IndexWriteError):
-            await applier.remove(_remove())
+            await applier.remove(job)
 
+
+class TestStaleApplies:
     """A delayed or retried apply can't undo a newer version or a deletion."""
 
     async def test_refuses_an_older_version_after_the_newer_is_removed(

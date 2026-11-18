@@ -127,8 +127,9 @@ class TestDispatch:
             raise RuntimeError(msg)
 
         failing = dispatch.BatchingDispatcher(pending, lost)
+        job = _remove(1)
         with pytest.raises(RuntimeError):
-            await failing.dispatch(_remove(1))
+            await failing.dispatch(job)
 
         publish = Publisher()
         await dispatch.BatchingDispatcher(pending, publish).dispatch(_remove(2))
