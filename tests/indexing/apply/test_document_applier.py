@@ -164,6 +164,36 @@ class TestApply:
         assert await _found(index, "orchards") == [random_id]
 
 
+class FailingWrites(fake_chunk_index.InMemoryChunkIndex):
+    async def replace_document(self, *_):
+        msg = "disk full"
+        raise OSError(msg)
+
+    async def remove_version(self, *_):
+        msg = "disk full"
+        raise OSError(msg)
+
+
+class TestFailedWrites:
+    async def test_a_failed_apply_is_an_index_write_error(self, staged):
+        chunk_set = _staged("Hold a holding number.")
+        await staged.put(chunk_set)
+        applier = document_applier.DocumentApplier(staged, FailingWrites(), STRATEGY)
+        job = _job(chunk_set)
+
+        with pytest.raises(document_applier.IndexWriteError) as raised:
+            await applier.apply(job)
+
+        assert isinstance(raised.value.__cause__, OSError)
+
+    async def test_a_failed_removal_is_an_index_write_error(self, staged):
+        applier = document_applier.DocumentApplier(staged, FailingWrites(), STRATEGY)
+        job = _remove()
+
+        with pytest.raises(document_applier.IndexWriteError):
+            await applier.remove(job)
+
+
 class TestStaleApplies:
     """A delayed or retried apply can't undo a newer version or a deletion."""
 
@@ -432,6 +462,94 @@ class TestPublish:
         assert again is None
         assert await index_builds.active_build() == removed
         assert removed != active
+
+    async def test_publishes_a_batch_as_one_build(
+        self,
+        index_builds,
+        applier_for,
+        staged,
+        tmp_path,
+        mocker,
+    ):
+        first_job = await _stage(staged, "Hold a holding number.")
+        second_job = await _stage(staged, "Licences.", SECOND_DOCUMENT_ID)
+        uploads = mocker.spy(index_builds, "publish")
+
+        published = await document_applier.publish_all(
+            [first_job, second_job], index_builds, applier_for
+        )
+
+        assert published.errors == (None, None)
+        assert await index_builds.active_build() == published.build_id
+        assert uploads.await_count == 1
+        await index_builds.load(tmp_path / "check")
+        assert _documents_in(tmp_path / "check") == sorted(
+            [str(fixtures.DOCUMENT_ID), str(SECOND_DOCUMENT_ID)],
+        )
+
+    async def test_publishes_the_rest_of_a_batch_when_one_job_fails(
+        self,
+        index_builds,
+        applier_for,
+        staged,
+        tmp_path,
+    ):
+        never_staged = _job(_staged("Never staged."))
+        job = await _stage(staged, "Licences.", SECOND_DOCUMENT_ID)
+
+        published = await document_applier.publish_all(
+            [never_staged, job], index_builds, applier_for
+        )
+
+        failed, applied = published.errors
+        assert isinstance(failed, document_applier.ChunkSetNotFoundError)
+        assert applied is None
+        await index_builds.load(tmp_path / "check")
+        assert _documents_in(tmp_path / "check") == [str(SECOND_DOCUMENT_ID)]
+
+    async def test_publishes_nothing_when_a_write_fails_after_committing(
+        self,
+        index_builds,
+        staged,
+    ):
+        first_job = await _stage(staged, "Hold a holding number.")
+        failing_job = await _stage(staged, "Licences.", SECOND_DOCUMENT_ID)
+
+        class FailsAfterCommitting(tantivy_index.TantivyChunkIndex):
+            async def replace_document(self, header, chunks):
+                await super().replace_document(header, chunks)
+                if header.document_id == SECOND_DOCUMENT_ID:
+                    msg = "reload failed"
+                    raise RuntimeError(msg)
+
+        def applier_for(directory):
+            return document_applier.DocumentApplier(
+                staged, FailsAfterCommitting(directory), STRATEGY
+            )
+
+        with pytest.raises(document_applier.IndexWriteError):
+            await document_applier.publish_all(
+                [first_job, failing_job], index_builds, applier_for
+            )
+
+        assert await index_builds.active_build() is None
+
+    async def test_publishes_no_build_for_a_batch_that_changed_nothing(
+        self,
+        index_builds,
+        applier_for,
+        staged,
+    ):
+        job = await _stage(staged, "Hold a holding number.")
+        await document_applier.publish(job, index_builds, applier_for)
+        removed = await document_applier.publish(_remove(), index_builds, applier_for)
+
+        published = await document_applier.publish_all(
+            [_remove(), _remove()], index_builds, applier_for
+        )
+
+        assert published == document_applier.Published(None, (None, None))
+        assert await index_builds.active_build() == removed
 
     async def test_publishes_from_config(self, mocker, tmp_path):
         config = app_config.get_config()

@@ -330,8 +330,14 @@ mypy refuses one where another belongs:
 | `PUT: /documents/{documentId}/versions/{versionId}` | Index a version (202). The body carries exactly one of `contentUrl` (`s3://…/content.md`) or `content` (`markdown`), plus `status`, `occurredAt`, `versionNumber` and the CMS `metadata`. `status` must be `published` (the index holds one version per document, so anything else is refused with 422), and `metadata.guideTitle` is required: it is the indexed title, never the Markdown's `# ` line. A version older than the one indexed is skipped. `http` mode only. |
 | `DELETE: /documents/{documentId}/versions/{versionId}` | Remove a version at every status (202): from the index if it is the version indexed, and its staged files. `http` mode only. |
 
-Both ingestion routes reply once the request is valid and do the work afterwards,
-one request at a time per replica. A failure is logged and counted
+Both ingestion routes reply once the request is valid and do the work afterwards.
+Each replica prepares up to 4 versions at once, and writes to the index in
+batches: whatever arrives while one batch is being published goes in the next,
+so a burst of requests costs one more upload of the index rather than one each.
+Requests may finish out of arrival order; an older version never replaces a
+newer one, nor brings back a deleted one. Requests for the same version take
+turns. A job that fails before writing fails alone; a failed write fails its
+whole batch, which publishes nothing. A failure is logged and counted
 (`IngestionFailed`, with `ENABLE_METRICS`), not retried: resending the same request
 is always safe.
 

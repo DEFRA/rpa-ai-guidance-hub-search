@@ -4,6 +4,8 @@ from unittest.mock import MagicMock
 import boto3
 
 from app.common import s3
+from app.index import builds
+from app.ingestion import service
 
 
 class TestGetS3Client:
@@ -72,3 +74,14 @@ class TestGetS3Client:
         assert config.connect_timeout == 2.5
         assert config.read_timeout == 2.5
         assert config.retries == {"total_max_attempts": 2, "mode": "standard"}
+        assert config.max_pool_connections == s3.MAX_POOL_CONNECTIONS
+
+
+class TestPoolSize:
+    def test_holds_every_call_ingestion_can_make_at_once(self):
+        """Each document being prepared makes one call at a time; builds move
+        `TRANSFER_CONCURRENCY` files at once. Past the pool, urllib3 throws
+        connections away ("Connection pool is full")."""
+        most_at_once = service.PREPARE_CONCURRENCY + builds.TRANSFER_CONCURRENCY
+
+        assert most_at_once < s3.MAX_POOL_CONNECTIONS

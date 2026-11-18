@@ -1,6 +1,7 @@
 """Index builds in S3, and the active-build pointer in MongoDB."""
 
 import asyncio
+import threading
 import uuid
 
 import pytest
@@ -176,12 +177,12 @@ class TestS3BuildStore:
         real_upload = moto_s3.upload_file
         calls = []
 
-        def flaky_upload(filename, bucket, key):
+        def flaky_upload(filename, bucket, key, **kwargs):
             calls.append(key)
             if len(calls) == 1:
                 msg = "boom"
                 raise RuntimeError(msg)
-            real_upload(filename, bucket, key)
+            real_upload(filename, bucket, key, **kwargs)
 
         mocker.patch.object(moto_s3, "upload_file", side_effect=flaky_upload)
 
@@ -189,6 +190,30 @@ class TestS3BuildStore:
             await s3_store.upload(directory)
 
         assert _keys(moto_s3, BUCKET) == []
+
+    async def test_moves_each_file_in_one_thread_of_the_transfer_executor(
+        self,
+        s3_store,
+        moto_s3,
+        tmp_path,
+        mocker,
+    ):
+        directory = await _written_index(tmp_path / "index")
+        real_upload = moto_s3.upload_file
+        seen = []
+
+        def recording_upload(filename, bucket, key, **kwargs):
+            seen.append((threading.current_thread().name, kwargs["Config"]))
+            real_upload(filename, bucket, key, **kwargs)
+
+        mocker.patch.object(moto_s3, "upload_file", side_effect=recording_upload)
+
+        await s3_store.upload(directory)
+
+        assert seen
+        for thread, config in seen:
+            assert thread.startswith("index-build-transfer")
+            assert config.use_threads is False
 
     async def test_deleting_an_absent_build_is_fine(self, s3_store):
         await s3_store.delete(builds.BuildId("absent"))

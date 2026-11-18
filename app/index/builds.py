@@ -17,19 +17,30 @@ Everything is keyed by `index_schema.SCHEMA_VERSION`. Code only ever loads or
 replaces builds of its own version, so during a deploy that changes the index
 schema the old and new versions each keep their own active build.
 
+**Transfers are bounded.** A build is one file per Tantivy segment component, and
+uploading or downloading one moves every file. They go through one executor of
+`TRANSFER_CONCURRENCY` threads, of its own so that search's `to_thread` calls
+never wait behind them, and each file goes in a single thread (s3transfer would
+otherwise start up to 10 more per file), so at most `TRANSFER_CONCURRENCY` of the
+S3 client's pooled connections carry builds at once.
+
 Not here yet: deleting old builds, retrying a lost swap, and reloading a newer
 build into a running service.
 """
 
 import asyncio
 import datetime as dt
+import functools
 import logging
 import pathlib
 import uuid
+from collections.abc import Callable
+from concurrent import futures
 from typing import TYPE_CHECKING, Annotated, NewType, Protocol
 
 import fastapi
 import pymongo
+from boto3.s3 import transfer
 from pymongo import errors as pymongo_errors
 
 from app import config as app_config
@@ -48,6 +59,13 @@ INDEX_STATE = "index_state"
 
 # Tantivy's lock files belong to a running writer, not to the index.
 _LOCK_SUFFIX = ".lock"
+
+TRANSFER_CONCURRENCY = 8
+_TRANSFERS = futures.ThreadPoolExecutor(
+    max_workers=TRANSFER_CONCURRENCY,
+    thread_name_prefix="index-build-transfer",
+)
+_ONE_THREAD_PER_FILE = transfer.TransferConfig(use_threads=False)
 
 
 class LostSwapError(Exception):
@@ -138,7 +156,7 @@ class S3BuildStore:
 
         results = await asyncio.gather(
             *(
-                asyncio.to_thread(
+                _transfer(
                     self._client.upload_file,
                     str(path),
                     self._bucket,
@@ -166,7 +184,7 @@ class S3BuildStore:
 
         await asyncio.gather(
             *(
-                asyncio.to_thread(
+                _transfer(
                     self._client.download_file,
                     self._bucket,
                     key,
@@ -255,6 +273,14 @@ def get_index_build_service(
             version,
         ),
         active=MongoActiveBuild(database, version),
+    )
+
+
+async def _transfer(move: Callable[..., None], *args: str) -> None:
+    """Runs one file's `upload_file` or `download_file` on the transfer executor."""
+    await asyncio.get_running_loop().run_in_executor(
+        _TRANSFERS,
+        functools.partial(move, *args, Config=_ONE_THREAD_PER_FILE),
     )
 
 
