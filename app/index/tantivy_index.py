@@ -333,11 +333,11 @@ class TantivyChunkIndex:
                 )
 
         hits.sort(key=lambda hit: (-hit.coverage, hit.title, str(hit.document_id)))
-        return hits[: chunk_index.MAX_TITLE_COVERS]
+        return hits
 
     def _title_cover_shortlist(self, text: str) -> tantivy.Query:
         """Titles with a word near every query word, as `title_cover` forgives:
-        "payments" shortlists "Final Payment Case Check Guide"."""
+        "reports" shortlists "Sample Report Layout Overview Notes"."""
         schema = self._index.schema
         return tantivy.Query.boolean_query(
             [

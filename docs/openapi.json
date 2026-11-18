@@ -124,7 +124,7 @@
             "type": "string"
           },
           "results": {
-            "description": "The documents whose sections hold the words, by their best section. When `titles` has just one, it is left out of these",
+            "description": "The documents whose sections hold the words, by their best section. One whose title the words cover too is also in `titles`",
             "items": {
               "$ref": "#/components/schemas/DocumentResult"
             },
@@ -150,7 +150,7 @@
             "type": "boolean"
           },
           "total": {
-            "description": "Every document `results` pages through, not just this page; 0 when there are too many matches",
+            "description": "Every document whose sections hold the words, not just this page; 0 when there are too many matches",
             "title": "Total",
             "type": "integer"
           }

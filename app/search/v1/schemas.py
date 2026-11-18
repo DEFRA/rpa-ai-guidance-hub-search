@@ -168,8 +168,8 @@ class DocumentSearchResponse(_Schema):
 
     query_id: str
     total: int = pydantic.Field(
-        description="Every document `results` pages through, not just this page; "
-        "0 when there are too many matches",
+        description="Every document whose sections hold the words, not just this "
+        "page; 0 when there are too many matches",
     )
     document_total: int = pydantic.Field(
         default=0,
@@ -181,12 +181,12 @@ class DocumentSearchResponse(_Schema):
     )
     results: list[DocumentResult] = pydantic.Field(
         description="The documents whose sections hold the words, by their best "
-        "section. When `titles` has just one, it is left out of these",
+        "section. One whose title the words cover too is also in `titles`",
     )
     titles: list[DocumentResult] = pydantic.Field(
         default_factory=list,
         description="Every document whose title the words cover, most covered "
-        "first, at most 50; the same on every page",
+        f"first, at most {service.MAX_TITLE_COVERS}; the same on every page",
     )
     too_many_matches: bool = False
     message: str | None = None

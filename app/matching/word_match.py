@@ -1,10 +1,10 @@
 """Word's Find matching: any case, anywhere in a word, several words as one
 phrase, never across two blocks (lines). 1 or 2 characters match whole words,
-and so do codes (words with a digit, such as "AB12"): "AB1" never finds "AB12".
+and so do codes (words with a digit, such as "XY12"): "XY1" never finds "XY12".
 
 Near matching forgives typos: each query word may match a whole word within a
 typo budget, a swap of two letters counting as one edit, and the words must
-still be one phrase in one block.
+still be one phrase in one block. A code on either side is never forgiven.
 """
 
 import re
@@ -57,8 +57,8 @@ def _is_code(word: str) -> bool:
 def typo_budget(word: str) -> int:
     """Edits a word of this length may be off by: 0 up to 3, 1 up to 7, else 2.
 
-    A word with a digit in it is a code, such as the land use code "AB12",
-    which is never forgiven: "AB12" must not match "AB1" or "AB13".
+    A word with a digit in it is a code, such as "XY12", which is never
+    forgiven: "XY12" must not match "XY1" or "XY13".
     """
     if _is_code(word):
         return 0
@@ -92,7 +92,7 @@ def find_near(query: str, text: str) -> tuple[tuple[int, int], ...]:
         run = tokens[start : start + len(words)]
 
         if _is_phrase(text, run) and all(
-            _within_budget(word, token[0])
+            within_budget(word, token[0])
             for word, token in zip(words, run, strict=True)
         ):
             spans.append((run[0].start(), run[-1].end()))
@@ -111,6 +111,15 @@ def _is_phrase(text: str, run: list[re.Match[str]]) -> bool:
     )
 
 
-def _within_budget(word: str, token: str) -> bool:
-    budget = typo_budget(word)
-    return OSA.distance(word, token.casefold(), score_cutoff=budget) <= budget
+def within_budget(word: str, token: str) -> bool:
+    """The same word, or within `word`'s typo budget of `token`.
+
+    A code on either side must be the same: "ABCD" never matches "ABCD1".
+    """
+    token = token.casefold()
+
+    if word == token:
+        return True
+
+    budget = 0 if _is_code(token) else typo_budget(word)
+    return bool(budget) and OSA.distance(word, token, score_cutoff=budget) <= budget

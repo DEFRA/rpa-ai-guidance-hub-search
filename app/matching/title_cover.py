@@ -3,22 +3,20 @@ cover each other.
 
 Words are letters and digits in any case, so punctuation and hyphens fall
 away, and stop words are left out of both. A query word matches a title word
-whole or within `word_match.typo_budget`, so plurals and typos are forgiven
-("payments" matches "payment") but codes never are ("AB1" never matches
-"AB12").
+whole or within `word_match.within_budget`, so plurals and typos are forgiven
+("reports" matches "report") but codes never are ("XY1" never matches
+"XY12", nor "ABCD" "ABCD1").
 
 A title is covered when every query word matches one of its words, and either
 the query holds enough of the title's words (`MIN_TITLE_COVERAGE`, from at
 least `MIN_QUERY_WORDS` words unless it holds them all) or the query is the
-start of the title and at least `MIN_PREFIX_WORDS` long. So "Final Payments"
-covers "Final Payment Case Check Guide" and "CS MA" covers every
-"CS MA Claim - ..." title, but a single keyword such as "weight" never covers
-a longer title.
+start of the title and at least `MIN_PREFIX_WORDS` long. So "Sample Reports"
+covers "Sample Report Layout Overview Notes" and "Alpha Beta" covers every
+"Alpha Beta Topic - ..." title, but a single keyword such as "notes" never
+covers a longer title.
 """
 
 import re
-
-from rapidfuzz.distance import OSA
 
 from app.matching import word_match
 
@@ -106,11 +104,4 @@ def _held(query_words: list[str], title_word: str) -> bool:
 
 
 def _same(word: str, title_word: str) -> bool:
-    """The same word, or within the query word's typo budget of it."""
-    if word == title_word:
-        return True
-
-    budget = word_match.typo_budget(word)
-    return bool(budget) and (
-        OSA.distance(word, title_word, score_cutoff=budget) <= budget
-    )
+    return word_match.within_budget(word, title_word)

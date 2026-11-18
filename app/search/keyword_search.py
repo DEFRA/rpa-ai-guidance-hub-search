@@ -1,5 +1,6 @@
 """`SearchService` for keyword search, over any `ChunkIndex`."""
 
+import itertools
 import logging
 import uuid
 
@@ -55,9 +56,9 @@ class KeywordSearch:
 
         The index gives hits best first, so grouping in order of first
         appearance ranks a document where its best section does. The titles
-        the words cover are given apart; when there is just one, its document
-        is left out of the pages, so it is never shown twice. Excerpts are made
-        only for the sections given back.
+        the words cover are given apart, at most `MAX_TITLE_COVERS`, and a
+        document may be in both; its result then carries `title_match`.
+        Excerpts are made only for the sections given back.
         """
         query_id = _query_id()
         query = chunk_index.ChunkQuery(
@@ -81,10 +82,7 @@ class KeywordSearch:
         for hit in hits.hits:
             by_document.setdefault(hit.document_id, []).append(hit)
 
-        promoted = set(titles) if len(titles) == 1 else set()
-        documents = [
-            document_id for document_id in by_document if document_id not in promoted
-        ]
+        documents = list(by_document)
         page = documents[request.offset : request.offset + request.limit]
         logger.info(
             "Document search %s found %d sections in %d documents and %d titles; "
@@ -111,7 +109,10 @@ class KeywordSearch:
             ),
             titles=tuple(
                 _document_result(request, title, by_document.get(document_id, []))
-                for document_id, title in titles.items()
+                for document_id, title in itertools.islice(
+                    titles.items(),
+                    service.MAX_TITLE_COVERS,
+                )
             ),
         )
 

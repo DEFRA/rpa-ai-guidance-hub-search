@@ -125,7 +125,7 @@ class InMemoryChunkIndex:
             if (coverage := title_cover.coverage(query.text, header.title))
         ]
         hits.sort(key=lambda hit: (-hit.coverage, hit.title, str(hit.document_id)))
-        return hits[: chunk_index.MAX_TITLE_COVERS]
+        return hits
 
     def _visible(
         self,
@@ -169,7 +169,7 @@ def _match(
 
 
 def _near_matches(query: str, text: str) -> int:
-    """Runs of whole words in one block, each within the query word's budget."""
+    """Runs of whole words in one block, each `word_match.within_budget`."""
     words = [word.casefold() for word in _WORD.findall(query)]
 
     if not words:
@@ -183,7 +183,7 @@ def _near_matches(query: str, text: str) -> int:
         for start in range(len(candidates) - len(words) + 1):
             run = candidates[start : start + len(words)]
             count += all(
-                _distance(word, candidate) <= chunk_index.typo_budget(word)
+                word_match.within_budget(word, candidate)
                 for word, candidate in zip(words, run, strict=True)
             )
 

@@ -9,7 +9,6 @@ from app.matching import word_match
 from app.records import ids, models
 
 MAX_LIMIT = 1000
-MAX_TITLE_COVERS = 50
 
 
 def typo_budget(word: str) -> int:
@@ -183,9 +182,8 @@ class TitleRetriever(Protocol):
         ...
 
     async def search_title_covers(self, query: ChunkQuery) -> list[TitleCoverHit]:
-        """The titles the query's words cover, most covered first, then by
-        title; at most `MAX_TITLE_COVERS`. Honours `statuses` and `tag`;
-        ignores `limit` and `offset`.
+        """Every title the query's words cover, most covered first, then by
+        title. Honours `statuses` and `tag`; ignores `limit` and `offset`.
         """
         ...
 

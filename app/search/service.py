@@ -9,6 +9,7 @@ from app.index import chunk_index
 from app.records import ids, models
 
 MAX_MATCHES = 1000
+MAX_TITLE_COVERS = 50
 
 
 class TooManyMatchesError(Exception):
@@ -100,8 +101,8 @@ class DocumentResults:
 
     `total` counts the documents paged through, `section_total` every matching
     section. `titles` are the documents whose title the words cover, most
-    covered first; when there is only one it is left out of `results` and
-    `total`. `document_total` counts every document in either.
+    covered first, at most `MAX_TITLE_COVERS`; they may also be in `results`.
+    `document_total` counts every document in either, past that cap too.
     """
 
     query_id: str
