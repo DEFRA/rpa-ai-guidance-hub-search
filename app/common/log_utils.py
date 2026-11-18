@@ -1,6 +1,6 @@
 import logging
 
-from app.common import tracing
+from app.common import redaction, tracing
 
 
 # Adds additional ECS fields to the logger.
@@ -31,3 +31,19 @@ class EndpointFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         return record.getMessage().find(self._path) == -1
+
+
+class AccessLogRedactionFilter(logging.Filter):
+    """Redacts search text from uvicorn's access log lines.
+
+    For the `uvicorn.access` logger, whose records carry `(client, method,
+    path_with_query, http_version, status)` as their arguments.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+
+        if isinstance(args, tuple) and len(args) == 5 and isinstance(args[2], str):
+            record.args = (*args[:2], redaction.redact_query(args[2]), *args[3:])
+
+        return True

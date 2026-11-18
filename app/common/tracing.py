@@ -6,6 +6,8 @@ import fastapi
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.types import ASGIApp
 
+from app.common import redaction
+
 logger = getLogger(__name__)
 
 ctx_trace_id: contextvars.ContextVar[str] = contextvars.ContextVar("trace_id")
@@ -31,7 +33,12 @@ class TraceIdMiddleware(BaseHTTPMiddleware):
         if req_trace_id:
             ctx_trace_id.set(req_trace_id)
 
-        ctx_request.set({"url": str(request.url), "method": request.method})
+        ctx_request.set(
+            {
+                "url": redaction.redact_query(str(request.url)),
+                "method": request.method,
+            }
+        )
 
         response: fastapi.Response = await call_next(request)
         ctx_response.set({"status_code": response.status_code})

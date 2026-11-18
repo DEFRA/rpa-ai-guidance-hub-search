@@ -1,6 +1,11 @@
 {
   "version": 1,
   "disable_existing_loggers": false,
+  "filters": {
+      "access_log_redaction": {
+          "()": "app.common.log_utils.AccessLogRedactionFilter"
+      }
+  },
   "formatters": {
       "dev": {
           "format": "%(levelname)s - %(name)s - %(message)s"
@@ -21,6 +26,9 @@
     "app": {
       "level": "INFO",
       "propagate": true
+    },
+    "uvicorn.access": {
+      "filters": ["access_log_redaction"]
     }
   },
   "root": {

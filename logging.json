@@ -8,6 +8,9 @@
       "healthcheck_filter": {
           "()": "app.common.log_utils.EndpointFilter",
           "path": "/health"
+      },
+      "access_log_redaction": {
+          "()": "app.common.log_utils.AccessLogRedactionFilter"
       }
   },
   "formatters": {
@@ -28,6 +31,9 @@
     }
   },
   "loggers": {
+    "uvicorn.access": {
+      "filters": ["access_log_redaction"]
+    }
   },
   "root": {
       "level": "INFO",
