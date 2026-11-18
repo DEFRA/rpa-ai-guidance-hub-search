@@ -126,8 +126,9 @@ class TestDispatch:
             msg = "lost the swap"
             raise RuntimeError(msg)
 
+        failing = dispatch.BatchingDispatcher(pending, lost)
         with pytest.raises(RuntimeError):
-            await dispatch.BatchingDispatcher(pending, lost).dispatch(_remove(1))
+            await failing.dispatch(_remove(1))
 
         publish = Publisher()
         await dispatch.BatchingDispatcher(pending, publish).dispatch(_remove(2))
