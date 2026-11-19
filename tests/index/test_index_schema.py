@@ -16,6 +16,7 @@ HEADER, CHUNKS = fixtures.document([fixtures.Section("4.2.1 Concurrent claims", 
 RELEASED_FIELDS = {
     1: "91fcd65ac9858576afa97e56033112ed4b37bb6c58128c042709150632b825c2",
     2: "bf09b5a424f2e50e4a6dfab74c14d425fa6d6adc8f642cea47acefc03a0b815e",
+    3: "bf09b5a424f2e50e4a6dfab74c14d425fa6d6adc8f642cea47acefc03a0b815e",
 }
 
 

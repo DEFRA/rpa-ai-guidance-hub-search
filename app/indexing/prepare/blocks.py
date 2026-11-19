@@ -3,7 +3,8 @@
 A block is a paragraph, a list, a blockquote or a table. Blocks are never split.
 Each one keeps its raw Markdown and its plain-text lines. A line is one
 paragraph, one list item, one table row or one line of a blockquote, so a phrase
-never matches across two of them.
+never matches across two of them. A hard break is a space within its line, as a
+page renders it (`<br>`).
 
 Chonkie's `MarkdownChef` finds the tables. The dialect has no code blocks, so
 blank lines separate everything else.
@@ -14,15 +15,13 @@ from collections.abc import Sequence
 
 import chonkie
 
-from app.indexing.prepare import plain_text
-from app.records import models
+from app.records import models, plain_text, tables
 
 # Groups: indent, bullet, ordered delimiter. Items of one list share all three.
 _LIST_MARKER = re.compile(r"^(\s*)(?:([-*+])|\d+([.)]))\s+")
 _QUOTE_MARKER = re.compile(r"^>\s?")
-_TABLE_DELIMITER = re.compile(r"^\|(?:\s*:?-+:?\s*\|)+\s*$")
-_ESCAPED_PIPE = "\\|"
-_PIPE_PLACEHOLDER = "\x00"
+# How a table row's cells join into its one line.
+_TABLE_CELL_SEPARATOR = " | "
 
 
 def parse(body: str, chef: chonkie.MarkdownChef) -> list[models.Block]:
@@ -138,31 +137,37 @@ def _block(kind: models.BlockKind, lines: Sequence[str]) -> models.Block:
 
 
 def _logical_lines(lines: Sequence[str]) -> tuple[str, ...]:
-    """A new line at each list item, after a blank line and after a hard break."""
+    """A new line at each list item and after a blank line."""
     groups: list[list[str]] = []
-    breaks = True
+    blank = True
 
     for line in lines:
         if not line.strip():
-            breaks = True
+            blank = True
             continue
 
         marker = _LIST_MARKER.match(line)
+        text = _without_hard_break(line[marker.end() :] if marker else line)
 
-        if marker or breaks:
-            groups.append([line[marker.end() :] if marker else line])
+        if marker or blank:
+            groups.append([text])
         else:
-            groups[-1].append(line)
+            groups[-1].append(text)
 
-        breaks = _ends_with_hard_break(line.rstrip())
+        blank = False
 
     stripped = (plain_text.strip_inline(" ".join(group)) for group in groups)
     return tuple(line for line in stripped if line)
 
 
-def _ends_with_hard_break(line: str) -> bool:
-    """An odd run of trailing backslashes: the last one is not itself escaped."""
-    return (len(line) - len(line.rstrip("\\"))) % 2 == 1
+def _without_hard_break(line: str) -> str:
+    """The line without its hard break: an odd run of trailing backslashes, the
+    last one not itself escaped. The break reads as the space the lines join on.
+    """
+    trimmed = line.rstrip()
+    breaks = (len(trimmed) - len(trimmed.rstrip("\\"))) % 2 == 1
+
+    return trimmed[:-1] if breaks else line
 
 
 def _quote_lines(lines: Sequence[str]) -> tuple[str, ...]:
@@ -171,22 +176,12 @@ def _quote_lines(lines: Sequence[str]) -> tuple[str, ...]:
 
 
 def _table(content: str) -> models.Block:
-    rows = content.strip("\n").split("\n")
-    plain = (_row_text(row) for row in rows if not _TABLE_DELIMITER.match(row.strip()))
+    """A line per row, its cells joined so a phrase never runs from one into
+    the next."""
+    markdown = content.strip("\n")
 
     return models.Block(
         kind=models.BlockKind.TABLE,
-        markdown="\n".join(rows),
-        lines=tuple(row for row in plain if row),
+        markdown=markdown,
+        lines=tuple(_TABLE_CELL_SEPARATOR.join(row) for row in tables.rows(markdown)),
     )
-
-
-def _row_text(row: str) -> str:
-    """Cells joined by `" | "`, so a phrase never runs from one cell into the next."""
-    protected = row.strip().replace(_ESCAPED_PIPE, _PIPE_PLACEHOLDER).strip("|")
-    cells = (
-        plain_text.strip_inline(cell.replace(_PIPE_PLACEHOLDER, _ESCAPED_PIPE))
-        for cell in protected.split("|")
-    )
-
-    return " | ".join(cell for cell in cells if cell)

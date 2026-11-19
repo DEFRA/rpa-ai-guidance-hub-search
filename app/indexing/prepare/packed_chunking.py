@@ -16,6 +16,10 @@ from app.records import models
 
 MAX_TOKENS = 800
 
+# Bumped whenever the chunks change for the same sections, or the sections for
+# the same Markdown (2: a hard break is a space, not a new line).
+_REVISION = 2
+
 
 class PackedChunking:
     """Implements `chunking.ChunkingStrategy`."""
@@ -25,7 +29,7 @@ class PackedChunking:
 
     @property
     def name(self) -> str:
-        return f"packed-{self._max_tokens}"
+        return f"packed-{self._max_tokens}-v{_REVISION}"
 
     def chunk(
         self,

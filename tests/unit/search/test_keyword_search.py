@@ -9,6 +9,7 @@ from app.records import models
 from app.search import keyword_search, service
 from tests.fakes import chunk_index as fake_chunk_index
 from tests.support import chunks as fixtures
+from tests.support import titles
 
 Section = fixtures.Section
 PUBLISHED_ONLY = frozenset({models.DocumentStatus.PUBLISHED})
@@ -204,7 +205,98 @@ class TestSearchingDocuments:
         await search.search_documents(_documents("livestock"))
 
         assert "livestock" not in caplog.text.casefold()
-        assert "found 4 sections in 2 documents" in caplog.text
+        assert "found 4 sections in 2 documents and 0 titles" in caplog.text
+
+    async def test_keeps_a_covered_title_in_the_pages_too(self, search, index):
+        header, chunks = PUBLISHED
+        await index.replace_document(
+            header,
+            [dataclasses.replace(chunks[0], plain_text="Read the claims guidance.")],
+        )
+        other_header, other_chunks = OTHER
+        await index.replace_document(
+            other_header,
+            [dataclasses.replace(other_chunks[0], plain_text="See claims guidance.")],
+        )
+
+        results = await search.search_documents(_documents("claims guidance"))
+
+        assert {(r.title, r.title_match is not None) for r in results.results} == {
+            ("Claims Guidance", True),
+            ("Fees Guidance", False),
+        }
+        assert (results.total, results.document_total, results.section_total) == (
+            2,
+            2,
+            2,
+        )
+        (title,) = results.titles
+        assert (title.title, title.section_total) == ("Claims Guidance", 1)
+        assert title.title_match is not None
+        assert title.title_match.matches == ((0, 15),)
+
+    async def test_gives_a_covered_title_with_no_sections(self, search):
+        results = await search.search_documents(_documents("fees guidance"))
+
+        assert (results.total, results.document_total, results.results) == (0, 1, ())
+        (title,) = results.titles
+        assert (title.title, title.sections, title.section_total) == (
+            "Fees Guidance",
+            (),
+            0,
+        )
+
+    async def test_keeps_several_covered_titles_in_the_pages(self, search, index):
+        await index.replace_document(
+            *fixtures.document(
+                [Section("1 Overview", 1, ("Claims guidance annex.",))],
+                fixtures.header(
+                    document_id=OTHER_ID.__class__(
+                        "0199b8a2-0000-7000-8000-0000000000cc"
+                    ),
+                    title="Claims Guidance Annex",
+                ),
+            ),
+        )
+
+        results = await search.search_documents(_documents("claims guidance"))
+
+        assert [title.title for title in results.titles] == [
+            "Claims Guidance",
+            "Claims Guidance Annex",
+        ]
+        assert [(r.title, r.title_match is not None) for r in results.results] == [
+            ("Claims Guidance Annex", True),
+        ]
+        assert (results.total, results.document_total) == (1, 2)
+
+    async def test_counts_every_covered_title_past_those_given(self, search, index):
+        count = service.MAX_TITLE_COVERS + 1
+
+        for number in range(count):
+            await index.replace_document(
+                *fixtures.document(
+                    [Section("1 Overview", 1, ("Read this first.",))],
+                    fixtures.header(
+                        document_id=OTHER_ID.__class__(
+                            f"0199b8a2-0000-7000-8000-0000000004{number:02x}"
+                        ),
+                        title=f"{titles.SERIES} - Part {number}",
+                    ),
+                ),
+            )
+
+        results = await search.search_documents(_documents(titles.SERIES))
+
+        assert len(results.titles) == service.MAX_TITLE_COVERS
+        assert (results.total, results.document_total) == (0, count)
+
+    async def test_ranks_by_sections_alone_when_no_title_is_covered(self, search):
+        results = await search.search_documents(_documents("livestock"))
+
+        assert results.titles == ()
+        assert all(result.title_match is None for result in results.results)
+        assert results.document_total == 2
 
 
 class TestSearchingTitles:

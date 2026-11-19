@@ -13,6 +13,7 @@ import pytest
 from app.index import chunk_index as chunk_index_module
 from app.records import ids, models
 from tests.support import chunks as fixtures
+from tests.support import titles
 
 Section = fixtures.Section
 PUBLISHED = frozenset({models.DocumentStatus.PUBLISHED})
@@ -65,6 +66,25 @@ async def _found(
     query: chunk_index_module.ChunkQuery,
 ) -> list[tuple[str, ...]]:
     return [hit.heading_path for hit in (await index.search(query)).hits]
+
+
+def _titled_document(
+    number: int,
+    title: str,
+) -> tuple[models.DocumentHeader, list[models.ChunkRecord]]:
+    """A one-section document of its own, titled `title`."""
+    return fixtures.document(
+        [Section("1 Overview", 1, ("Read this first.",))],
+        fixtures.header(
+            document_id=ids.DocumentId(
+                uuid.UUID(f"0199b8a2-0000-7000-8000-0000000002{number:02x}"),
+            ),
+            version_id=ids.VersionId(
+                uuid.UUID(f"0199b8a2-0000-7000-8000-0000000003{number:02x}"),
+            ),
+            title=title,
+        ),
+    )
 
 
 async def _titled(
@@ -210,6 +230,17 @@ class ChunkIndexContract:
             NEXT_VERSION_ID
         )
 
+    async def test_knows_the_indexed_version_only_at_the_statuses_asked_for(
+        self, chunk_index
+    ):
+        header, _ = DRAFT
+        await chunk_index.replace_document(*DRAFT)
+
+        assert await chunk_index.indexed_version(header.document_id, PUBLISHED) is None
+        assert await chunk_index.indexed_version(header.document_id, EVERY_STATUS) == (
+            header.version_id
+        )
+
     async def test_finds_only_the_statuses_asked_for(self, chunk_index):
         await chunk_index.replace_document(*CLAIMS)
         await chunk_index.replace_document(*DRAFT)
@@ -292,6 +323,11 @@ class ChunkIndexContract:
             pytest.param("Make a claim for stock.", "claim for", True, id="one-block"),
             pytest.param("Rules for an area.", "an", True, id="short-whole-word"),
             pytest.param("Planting rules.", "an", False, id="short-inside-word"),
+            pytest.param("Rule XY12.", "XY12", True, id="code"),
+            pytest.param("Rule XY12.", "XY1", False, id="code-start"),
+            pytest.param("Rule XY12.", "Y12", False, id="code-end"),
+            pytest.param("Rule XY12.", "XY13", False, id="code-typo"),
+            pytest.param("Codes XY12 or XY1.", "XY1", True, id="code-beside-longer"),
         ],
     )
     async def test_matches_like_find_in_a_word_processor(
@@ -360,6 +396,7 @@ class ChunkIndexContract:
             pytest.param("Planting on an area.", "in", id="short-word"),
             pytest.param("Make a claimant list.", "clam", id="part-of-a-word"),
             pytest.param("Holding a number.", "hlding number", id="word-order"),
+            pytest.param("Rule ABCD1.", "ABCDE", id="code-in-the-text"),
         ],
     )
     async def test_finds_no_near_match_beyond_the_rules(self, chunk_index, body, text):
@@ -575,3 +612,142 @@ class ChunkIndexContract:
 
         assert await _titled(chunk_index, _titles("Guidance")) == BOTH
         assert len(await chunk_index.search_titles(_titles("Guidance", limit=1))) == 1
+
+    @pytest.mark.parametrize(
+        ("text", "found"),
+        [
+            pytest.param("claims guidance", {fixtures.DOCUMENT_ID}, id="any-case"),
+            pytest.param("Guidance, claims", {fixtures.DOCUMENT_ID}, id="any-order"),
+            pytest.param("the claims guidance", {fixtures.DOCUMENT_ID}, id="stop-word"),
+            pytest.param("guidance", set(), id="too-little-of-a-title"),
+            pytest.param("claims guide", set(), id="part-of-a-word"),
+            pytest.param("Woodland guidance", {OTHER_DOCUMENT_ID}, id="other-status"),
+            pytest.param("holding number", set(), id="body-only"),
+            pytest.param("claim guidance", {fixtures.DOCUMENT_ID}, id="singular"),
+            pytest.param("claims guidence", {fixtures.DOCUMENT_ID}, id="typo"),
+        ],
+    )
+    async def test_finds_titles_the_words_cover(self, chunk_index, text, found):
+        await chunk_index.replace_document(*CLAIMS)
+        await chunk_index.replace_document(*DRAFT)
+
+        hits = await chunk_index.search_title_covers(_query(text))
+
+        assert {hit.document_id for hit in hits} == found
+
+    async def test_returns_what_a_title_cover_hit_needs_to_be_shown(self, chunk_index):
+        header, _ = CLAIMS
+        await chunk_index.replace_document(*CLAIMS)
+
+        (hit,) = await chunk_index.search_title_covers(_query("claims guidance"))
+
+        assert hit == chunk_index_module.TitleCoverHit(
+            document_id=header.document_id,
+            version_id=header.version_id,
+            title="Claims Guidance",
+            status=models.DocumentStatus.PUBLISHED,
+            url=header.url,
+            coverage=1.0,
+            matches=((0, 15),),
+        )
+
+    async def test_finds_every_title_a_long_enough_start_covers(self, chunk_index):
+        for number, title in enumerate(
+            [
+                titles.SERIES_TITLE,
+                titles.SERIES_SIBLING_TITLE,
+                titles.OTHER_SERIES_TITLE,
+            ],
+        ):
+            await chunk_index.replace_document(*_titled_document(number, title))
+
+        hits = await chunk_index.search_title_covers(_query(titles.SERIES))
+
+        assert [hit.title for hit in hits] == [
+            titles.SERIES_SIBLING_TITLE,
+            titles.SERIES_TITLE,
+        ]
+
+    @pytest.mark.parametrize(
+        ("code", "found"),
+        [
+            pytest.param(titles.CODE, [titles.CODE], id="exact"),
+            pytest.param(titles.SHORTER_CODE, [titles.SHORTER_CODE], id="shorter"),
+            pytest.param(titles.NEAR_CODE, [], id="near"),
+        ],
+    )
+    async def test_never_blurs_codes(self, chunk_index, code, found):
+        for number, title_code in enumerate([titles.CODE, titles.SHORTER_CODE]):
+            await chunk_index.replace_document(
+                *_titled_document(number, f"{titles.SERIES} - {title_code}"),
+            )
+
+        hits = await chunk_index.search_title_covers(
+            _query(f"{titles.SERIES} {code}"),
+        )
+
+        assert [hit.title for hit in hits] == [
+            f"{titles.SERIES} - {title_code}" for title_code in found
+        ]
+
+    async def test_never_blurs_a_code_in_the_title(self, chunk_index):
+        await chunk_index.replace_document(
+            *_titled_document(0, f"{titles.SERIES} - ABCD1"),
+        )
+
+        assert (
+            await chunk_index.search_title_covers(_query(f"{titles.SERIES} ABCD")) == []
+        )
+
+    async def test_finds_every_covered_title(self, chunk_index):
+        count = 60  # past the 50 the search service gives back
+
+        for number in range(count):
+            await chunk_index.replace_document(
+                *_titled_document(number, f"{titles.SERIES} - Part {number}"),
+            )
+
+        hits = await chunk_index.search_title_covers(_query(titles.SERIES))
+
+        assert len(hits) == count
+
+    async def test_finds_titles_of_the_statuses_asked_for(self, chunk_index):
+        await chunk_index.replace_document(*DRAFT)
+
+        assert (
+            await chunk_index.search_title_covers(
+                _query("Woodland Guidance", PUBLISHED),
+            )
+            == []
+        )
+
+    @pytest.mark.parametrize(
+        ("tag", "found"),
+        [
+            pytest.param(fixtures.DOCUMENT_ID, {fixtures.DOCUMENT_ID}, id="document"),
+            pytest.param(NEXT_VERSION_ID, set(), id="not-indexed"),
+        ],
+    )
+    async def test_finds_titles_inside_one_document_or_version(
+        self, chunk_index, tag, found
+    ):
+        await chunk_index.replace_document(*CLAIMS)
+        await chunk_index.replace_document(*DRAFT)
+
+        hits = await chunk_index.search_title_covers(
+            _query("claims guidance", tag=tag),
+        )
+
+        assert {hit.document_id for hit in hits} == found
+
+    async def test_forgets_titles_with_the_document(self, chunk_index):
+        await chunk_index.replace_document(*CLAIMS)
+        await chunk_index.replace_document(CLAIMS[0], [])
+
+        assert await chunk_index.search_title_covers(_query("claims guidance")) == []
+
+    @pytest.mark.parametrize("text", ["", "   ", '"title:(*', "AND OR NOT", "the of"])
+    async def test_never_fails_on_titles_a_person_types(self, chunk_index, text):
+        await chunk_index.replace_document(*CLAIMS)
+
+        assert isinstance(await chunk_index.search_title_covers(_query(text)), list)

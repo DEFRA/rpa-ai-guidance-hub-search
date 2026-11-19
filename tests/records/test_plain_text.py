@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.indexing.prepare import plain_text
+from app.records import plain_text
 
 
 class TestStripInline:

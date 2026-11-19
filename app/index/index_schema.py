@@ -15,11 +15,11 @@ from collections.abc import Mapping, Sequence
 
 from app.records import ids, models
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # The chunking strategy whose chunks this schema version holds. The apply step
 # refuses chunks made by any other, so a strategy change is a schema change.
-CHUNK_STRATEGY = "packed-800"
+CHUNK_STRATEGY = "packed-800-v2"
 
 type IndexValue = str | int | tuple[str, ...] | Mapping[str, models.JsonValue] | None
 
