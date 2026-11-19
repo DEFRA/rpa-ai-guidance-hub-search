@@ -246,6 +246,46 @@ class TitleSearchResponse(_Schema):
         )
 
 
+class Match(_Schema):
+    start: int = pydantic.Field(description="Offset into the section's text")
+    end: int = pydantic.Field(description="Offset just past the match")
+    text: str = pydantic.Field(description="The words there, as written")
+
+
+class SectionMatches(_Schema):
+    anchor: str | None = pydantic.Field(
+        description="The section's fragment in the document; null for the text "
+        "before its first heading",
+    )
+    matches: list[Match]
+
+
+class DocumentMatchesResponse(_Schema):
+    """Where the words are in a document's indexed version, in each section
+    holding them, in document order. Offsets are into a section's text as the
+    hub reads it: its heading, then each line of its blocks on a line of its
+    own, whitespace within a line as one space."""
+
+    version_id: uuid.UUID
+    sections: list[SectionMatches]
+
+    @classmethod
+    def from_model(cls, found: service.DocumentMatches) -> DocumentMatchesResponse:
+        return cls(
+            version_id=found.version_id,
+            sections=[
+                SectionMatches(
+                    anchor=section.anchor,
+                    matches=[
+                        Match(start=match.start, end=match.end, text=match.text)
+                        for match in section.matches
+                    ],
+                )
+                for section in found.sections
+            ],
+        )
+
+
 def snippet_of(excerpt: service.Excerpt) -> list[SnippetPart]:
     """The excerpt in parts, its matches marked, empty parts left out."""
     parts: list[SnippetPart] = []
