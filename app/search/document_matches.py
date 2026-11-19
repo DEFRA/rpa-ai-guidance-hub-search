@@ -14,13 +14,10 @@ import logging
 
 from app.index import chunk_index
 from app.matching import word_match
-from app.records import ids, models, section_store
+from app.records import ids, models, section_store, tables
 from app.search import service
 
 logger = logging.getLogger(__name__)
-
-# How `indexing/prepare/blocks.py` joins a table row's cells into one line.
-_TABLE_CELL_SEPARATOR = " | "
 
 
 class DocumentMatchFinder:
@@ -39,8 +36,12 @@ class DocumentMatchFinder:
         statuses: frozenset[models.DocumentStatus],
     ) -> service.DocumentMatches | None:
         """The indexed version's matches; `None` when nothing is indexed for it,
-        or its status is not one of `statuses`."""
-        version_id = await self._index.indexed_version(document_id)
+        or its status is not one of `statuses`.
+
+        The status is the index's, as search filters on it: the stored sections
+        are keyed by version alone, so theirs may be ahead of the index.
+        """
+        version_id = await self._index.indexed_version(document_id, statuses)
 
         if version_id is None:
             return None
@@ -55,11 +56,7 @@ class DocumentMatchFinder:
             )
             return None
 
-        header, records = stored
-
-        if header.status not in statuses:
-            return None
-
+        _, records = stored
         found = (
             _section_matches(text, record)
             for record in sorted(records, key=lambda record: record.ordinal)
@@ -109,9 +106,9 @@ def _heading(section: models.SectionRecord) -> str | None:
 
 
 def _lines(block: models.Block) -> tuple[str, ...]:
+    """A table's cells are read from its Markdown, where an escaped pipe is
+    still told apart from the one between cells."""
     if block.kind is not models.BlockKind.TABLE:
         return block.lines
 
-    return tuple(
-        cell for row in block.lines for cell in row.split(_TABLE_CELL_SEPARATOR)
-    )
+    return tuple(cell for row in tables.rows(block.markdown) for cell in row)

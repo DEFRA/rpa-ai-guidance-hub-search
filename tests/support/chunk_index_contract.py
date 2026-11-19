@@ -230,6 +230,17 @@ class ChunkIndexContract:
             NEXT_VERSION_ID
         )
 
+    async def test_knows_the_indexed_version_only_at_the_statuses_asked_for(
+        self, chunk_index
+    ):
+        header, _ = DRAFT
+        await chunk_index.replace_document(*DRAFT)
+
+        assert await chunk_index.indexed_version(header.document_id, PUBLISHED) is None
+        assert await chunk_index.indexed_version(header.document_id, EVERY_STATUS) == (
+            header.version_id
+        )
+
     async def test_finds_only_the_statuses_asked_for(self, chunk_index):
         await chunk_index.replace_document(*CLAIMS)
         await chunk_index.replace_document(*DRAFT)

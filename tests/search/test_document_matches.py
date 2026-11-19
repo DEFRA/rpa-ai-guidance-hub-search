@@ -6,6 +6,7 @@ they count in must be the hub's reading of the guide. Guides are read here as
 indexing reads them, so a change there that moves an offset fails here.
 """
 
+import dataclasses
 import uuid
 
 import pytest
@@ -159,6 +160,41 @@ async def test_reads_each_table_cell_as_a_line_of_its_own(stored, finder):
     assert across.sections == ()
 
 
+async def test_keeps_an_escaped_pipe_within_its_table_cell(stored, finder):
+    document_id = await stored(
+        "## Rates\n\n| Item | Pay |\n|------|-----|\n| A \\| B | Pay |",
+    )
+
+    phrase = await finder.matches_in(document_id, "a | b", PUBLISHED)
+    cell = await finder.matches_in(document_id, "pay", PUBLISHED)
+
+    # Read as the page reads it: "Rates\nItem\nPay\nA | B\nPay".
+    assert phrase is not None
+    assert phrase.sections == (SectionMatches("rates", (Match(15, 20, "A | B"),)),)
+    assert cell is not None
+    assert cell.sections == (
+        SectionMatches("rates", (Match(11, 14, "Pay"), Match(21, 24, "Pay"))),
+    )
+
+
+async def test_a_phrase_runs_over_a_hard_break_as_the_page_shows_it(
+    stored,
+    finder,
+):
+    document_id = await stored("## Notes\n\nLine one\\\nline two\n\n- First\\\n  item")
+
+    paragraph = await finder.matches_in(document_id, "one line", PUBLISHED)
+    item = await finder.matches_in(document_id, "first item", PUBLISHED)
+
+    # Read as "Notes\nLine one line two\nFirst item".
+    assert paragraph is not None
+    assert paragraph.sections == (
+        SectionMatches("notes", (Match(11, 19, "one line"),)),
+    )
+    assert item is not None
+    assert item.sections == (SectionMatches("notes", (Match(24, 34, "First item"),)),)
+
+
 async def test_finds_nothing_for_no_words(stored, finder):
     document_id = await stored("## 1 Paying\n\nRepayment.")
 
@@ -183,6 +219,28 @@ async def test_answers_none_when_the_indexed_versions_sections_are_missing(
     await sections.delete(document_id, guides.VERSION_ID)
 
     assert await finder.matches_in(document_id, "pay", PUBLISHED) is None
+
+
+async def test_takes_the_status_from_the_index_not_the_stored_sections(
+    index,
+    sections,
+    finder,
+):
+    # The same version prepared as published: its sections are stored before
+    # the index changes, so for a while they are ahead of it.
+    source = guide_markdown.GuideMarkdownParser().parse(
+        guides.job(status=models.DocumentStatus.READY_FOR_PUBLISH),
+        "## 1 Paying\n\nRepayment.",
+        title="Claims",
+    )
+    records = sectioning.build(source)
+    published = dataclasses.replace(
+        source.header, status=models.DocumentStatus.PUBLISHED
+    )
+    await index.replace_document(source.header, fixtures.chunks_of(records))
+    await sections.put(published, records)
+
+    assert await finder.matches_in(published.document_id, "pay", PUBLISHED) is None
 
 
 async def test_answers_none_for_a_document_whose_indexed_version_is_not_published(
