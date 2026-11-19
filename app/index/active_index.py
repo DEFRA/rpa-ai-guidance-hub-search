@@ -50,11 +50,16 @@ async def refresh(
         target = directory / (build_id or _EMPTY)
 
         # Only ever the subdirectory named here, never `directory` itself.
-        if target.exists():
-            shutil.rmtree(target)
+        await asyncio.to_thread(_remove_directory, target)
 
-        await index_builds.download(build_id, target)
-        index = tantivy_index.TantivyChunkIndex(target)
+        try:
+            await index_builds.download(build_id, target)
+            index = tantivy_index.TantivyChunkIndex(target)
+        except BaseException:
+            # A partial copy is never served, and left behind it would pile up
+            # across failed polls. `target` is never the served or retained build.
+            await asyncio.shield(asyncio.to_thread(_remove_directory, target))
+            raise
 
         # At startup nothing is replaced, so earlier runs' builds all go.
         keep = {target.name}
@@ -70,7 +75,7 @@ async def refresh(
         )
 
         _index, _build_id = index, build_id
-        _remove_old_builds(directory, keep)
+        await asyncio.to_thread(_remove_old_builds, directory, keep)
 
         return build_id
 
@@ -104,6 +109,11 @@ def get_chunk_index() -> chunk_index.ChunkIndex:
 
 def loaded_build_id() -> builds.BuildId | None:
     return _build_id
+
+
+def _remove_directory(path: pathlib.Path) -> None:
+    if path.exists():
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def _remove_old_builds(directory: pathlib.Path, keep: set[str]) -> None:

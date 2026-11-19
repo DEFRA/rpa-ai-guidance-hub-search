@@ -40,15 +40,17 @@ async def lifespan(_: fastapi.FastAPI) -> AsyncGenerator[None]:
         )
     )
 
-    yield
+    try:
+        yield
+    finally:
+        polling.cancel()
 
-    polling.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await polling
+        with contextlib.suppress(asyncio.CancelledError):
+            await polling
 
-    if client:
-        await client.close()
-        logger.info("MongoDB client closed")
+        if client:
+            await client.close()
+            logger.info("MongoDB client closed")
 
 
 def create_app(
