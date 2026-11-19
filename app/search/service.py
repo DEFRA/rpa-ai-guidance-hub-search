@@ -119,6 +119,31 @@ class TitleResults:
     results: tuple[chunk_index.TitleHit, ...]
 
 
+@dataclasses.dataclass(frozen=True)
+class Match:
+    """One place in a section's text (`end` exclusive) and the words there."""
+
+    start: int
+    end: int
+    text: str
+
+
+@dataclasses.dataclass(frozen=True)
+class SectionMatches:
+    """`anchor` is None for the text before the document's first heading."""
+
+    anchor: str | None
+    matches: tuple[Match, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class DocumentMatches:
+    """Every section of the indexed version holding the words, in order."""
+
+    version_id: ids.VersionId
+    sections: tuple[SectionMatches, ...]
+
+
 class SearchService(Protocol):
     async def search_words(self, request: WordSearch) -> WordResults:
         """Raises `TooManyMatchesError` past `MAX_MATCHES`."""

@@ -10,7 +10,7 @@ these and nothing else:
 - `![](name)` images
 - backslash escapes and the `&amp;`, `&lt;`, `&gt;` entities
 
-Works on one line at a time; `blocks` decides where blocks and lines break.
+Works on one line at a time; the caller decides where blocks and lines break.
 """
 
 import html

@@ -8,8 +8,8 @@ way whatever the content came from.
 import urllib.parse
 from collections.abc import Mapping, Sequence
 
-from app.indexing.prepare import plain_text, sources
-from app.records import ids, models
+from app.indexing.prepare import sources
+from app.records import ids, models, plain_text
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 

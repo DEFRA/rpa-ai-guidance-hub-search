@@ -55,9 +55,14 @@ class InMemoryChunkIndex:
     async def indexed_version(
         self,
         document_id: ids.DocumentId,
+        statuses: frozenset[models.DocumentStatus] | None = None,
     ) -> ids.VersionId | None:
         entry = self._documents.get(document_id)
-        return entry[0].version_id if entry else None
+
+        if entry is None or (statuses is not None and entry[0].status not in statuses):
+            return None
+
+        return entry[0].version_id
 
     async def latest_version(
         self,

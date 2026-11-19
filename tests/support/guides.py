@@ -10,7 +10,7 @@ from app.records import ids, models
 FIXTURES = pathlib.Path(__file__).parent.parent / "indexing" / "prepare" / "fixtures"
 GUIDE = FIXTURES / "guide.md"
 GOLDEN_SECTIONS = FIXTURES / "guide.sections.golden.jsonl"
-GOLDEN_CHUNKS = FIXTURES / "guide.packed-800.golden.jsonl"
+GOLDEN_CHUNKS = FIXTURES / "guide.packed-800-v2.golden.jsonl"
 
 DOCUMENT_ID = ids.DocumentId(uuid.UUID("0199b8a2-0000-7000-8000-00000000f001"))
 VERSION_ID = ids.VersionId(uuid.UUID("0199b8a2-0000-7000-8000-00000000f002"))

@@ -100,8 +100,11 @@ class TantivyChunkIndex:
     async def indexed_version(
         self,
         document_id: ids.DocumentId,
+        statuses: frozenset[models.DocumentStatus] | None = None,
     ) -> ids.VersionId | None:
-        return await asyncio.to_thread(self._version_of, document_id, content=True)
+        return await asyncio.to_thread(
+            self._version_of, document_id, content=True, statuses=statuses
+        )
 
     async def latest_version(
         self,
@@ -495,11 +498,20 @@ class TantivyChunkIndex:
         document_id: ids.DocumentId,
         *,
         content: bool,
+        statuses: frozenset[models.DocumentStatus] | None = None,
     ) -> ids.VersionId | None:
+        query = self._entries(document_id, content=content)
+
+        if statuses is not None:
+            query = tantivy.Query.boolean_query(
+                [
+                    (tantivy.Occur.Must, query),
+                    (tantivy.Occur.Must, _status_filter(self._index.schema, statuses)),
+                ],
+            )
+
         searcher = self._index.searcher()
-        hits = searcher.search(
-            self._entries(document_id, content=content), limit=1
-        ).hits
+        hits = searcher.search(query, limit=1).hits
 
         if not hits:
             return None

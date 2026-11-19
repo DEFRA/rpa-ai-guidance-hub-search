@@ -328,7 +328,8 @@ class TestSectionIds:
         _, chunks = _chunk(NESTED)
 
         assert all(
-            chunk.chunk_id == ids.chunk_id("packed-800", chunk.section_id, chunk.part)
+            chunk.chunk_id
+            == ids.chunk_id("packed-800-v2", chunk.section_id, chunk.part)
             for chunk in chunks
         )
 

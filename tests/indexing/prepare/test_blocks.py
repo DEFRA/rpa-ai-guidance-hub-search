@@ -25,9 +25,14 @@ class TestParse:
             (Kind.PARAGRAPH, ("Two.",)),
         ]
 
-    def test_a_hard_break_starts_a_new_line(self, chef):
+    def test_a_hard_break_is_a_space_within_the_line(self, chef):
         assert _kinds("Line one\\\nline two", chef) == [
-            (Kind.PARAGRAPH, ("Line one", "line two")),
+            (Kind.PARAGRAPH, ("Line one line two",)),
+        ]
+
+    def test_a_hard_break_in_a_list_item_stays_in_the_item(self, chef):
+        assert _kinds("- Line one\\\n  line two\n- next", chef) == [
+            (Kind.LIST, ("Line one line two", "next")),
         ]
 
     def test_a_list_is_one_block_with_a_line_per_item(self, chef):

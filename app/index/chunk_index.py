@@ -155,8 +155,10 @@ class ChunkWriter(Protocol):
     async def indexed_version(
         self,
         document_id: ids.DocumentId,
+        statuses: frozenset[models.DocumentStatus] | None = None,
     ) -> ids.VersionId | None:
-        """The version whose content is indexed; `None` if there is none."""
+        """The version whose content is indexed; `None` if there is none, or
+        `statuses` is given and it is indexed at none of them."""
         ...
 
     async def latest_version(

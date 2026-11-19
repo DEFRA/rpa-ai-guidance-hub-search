@@ -92,7 +92,7 @@ class TestPrepare:
             "Hold a holding number.",
         ]
         assert apply_job.chunk_set_key == chunk_sets.key(
-            "packed-800",
+            "packed-800-v2",
             job.document_id,
             job.version_id,
             job.status,
@@ -108,7 +108,7 @@ class TestPrepare:
             job.version_id,
             job.status,
             job.occurred_at,
-            "packed-800",
+            "packed-800-v2",
         )
 
     async def test_preparing_again_stages_the_same_chunks(self, preparer, staged):

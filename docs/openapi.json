@@ -37,6 +37,29 @@
         "title": "Accepted",
         "type": "object"
       },
+      "DocumentMatchesResponse": {
+        "description": "Where the words are in a document's indexed version, in each section\nholding them, in document order. Offsets are into a section's text as the\nhub reads it: its heading, then each line of its blocks on a line of its\nown, whitespace within a line as one space.",
+        "properties": {
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/SectionMatches"
+            },
+            "title": "Sections",
+            "type": "array"
+          },
+          "versionId": {
+            "format": "uuid",
+            "title": "Versionid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "versionId",
+          "sections"
+        ],
+        "title": "DocumentMatchesResponse",
+        "type": "object"
+      },
       "DocumentResult": {
         "description": "One document holding the words in its sections, or whose title they\ncover, or both.",
         "properties": {
@@ -368,6 +391,32 @@
         "title": "InlineContent",
         "type": "object"
       },
+      "Match": {
+        "properties": {
+          "end": {
+            "description": "Offset just past the match",
+            "title": "End",
+            "type": "integer"
+          },
+          "start": {
+            "description": "Offset into the section's text",
+            "title": "Start",
+            "type": "integer"
+          },
+          "text": {
+            "description": "The words there, as written",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "text"
+        ],
+        "title": "Match",
+        "type": "object"
+      },
       "Operation": {
         "enum": [
           "index",
@@ -375,6 +424,35 @@
         ],
         "title": "Operation",
         "type": "string"
+      },
+      "SectionMatches": {
+        "properties": {
+          "anchor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The section's fragment in the document; null for the text before its first heading",
+            "title": "Anchor"
+          },
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/Match"
+            },
+            "title": "Matches",
+            "type": "array"
+          }
+        },
+        "required": [
+          "anchor",
+          "matches"
+        ],
+        "title": "SectionMatches",
+        "type": "object"
       },
       "SectionResult": {
         "description": "One section holding the words, at its best-matching chunk.",
@@ -781,6 +859,62 @@
         "summary": "Index Version",
         "tags": [
           "ingestion"
+        ]
+      }
+    },
+    "/v1/documents/{documentId}/matches": {
+      "get": {
+        "description": "Every match in the document's indexed version, for a page to mark.\n\n404 when no published version of the document is indexed.",
+        "operationId": "matches_v1_documents__documentId__matches_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documentId",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Documentid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Words to find, like Word's Find: any case, anywhere in a word, several words as one phrase; exact matches only",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "description": "Words to find, like Word's Find: any case, anywhere in a word, several words as one phrase; exact matches only",
+              "maxLength": 500,
+              "title": "Q",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentMatchesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Where words are in one document",
+        "tags": [
+          "search"
         ]
       }
     },

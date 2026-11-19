@@ -15,8 +15,8 @@ from collections.abc import Sequence
 import chonkie
 
 from app.indexing import jobs
-from app.indexing.prepare import anchors, blocks, plain_text, sources
-from app.records import ids, models, source_metadata
+from app.indexing.prepare import anchors, blocks, sources
+from app.records import ids, models, plain_text, source_metadata
 
 _TITLE = re.compile(r"# (?P<text>.+)")
 _HEADING = re.compile(r"(?P<hashes>#{2,}) (?P<text>.+)")

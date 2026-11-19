@@ -267,7 +267,7 @@ indexing (write)   search (read)  ->  search/v1 (GET /v1/search)
     `content.md` today, with `guide_cms` modelling the CMS API's guide and
     its metadata; GOV.UK content items would be another reader with their
     own Content API models and metadata type), `sectioning`
-    makes the canonical sections, and a named `ChunkingStrategy` (`packed-800`
+    makes the canonical sections, and a named `ChunkingStrategy` (`packed-800-v2`
     for the keyword index) chunks them. `DocumentPreparer` stores the sections
     and stages the chunk set. It never touches the index.
   - **`apply/`** writes an `ApplyJob`'s staged chunk set to the index.

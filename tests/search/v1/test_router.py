@@ -10,9 +10,10 @@ import app.entrypoints.fastapi
 from app.common import log_utils
 from app.index import active_index
 from app.records import models
-from app.search import service
+from app.search import document_matches, service
 from app.search.v1 import router
 from tests.fakes import chunk_index as fake_chunk_index
+from tests.fakes import section_store as fake_section_store
 from tests.support import chunks as fixtures
 
 Section = fixtures.Section
@@ -278,3 +279,111 @@ class TestTheUnversionedPath:
 class TestTheServiceDependency:
     def test_searches_the_loaded_index(self, index):
         assert router.get_search_service(index)._index is index
+
+
+class TestDocumentMatches:
+    """`GET /v1/documents/{documentId}/matches`: every place the words are."""
+
+    @pytest.fixture
+    async def sections(self):
+        store = fake_section_store.InMemorySectionStore()
+        header, records = fixtures.sections(
+            [Section("1 Overview", 1, ("Check the land use first.",))],
+        )
+        await store.put(header, records)
+        draft_header, draft_records = fixtures.sections(
+            [Section("1 Land", 1, ("Draft land rules.",))],
+            DRAFT[0],
+        )
+        await store.put(draft_header, draft_records)
+        return store
+
+    @pytest.fixture
+    def client(self, index, sections):
+        application = app.entrypoints.fastapi.create_app()
+        application.dependency_overrides[router.get_match_finder] = lambda: (
+            document_matches.DocumentMatchFinder(index, sections)
+        )
+        return fastapi.testclient.TestClient(application)
+
+    def test_answers_each_match_by_its_place_in_the_sections_text(self, client):
+        header, _ = CLAIMS
+
+        response = client.get(
+            f"/v1/documents/{header.document_id}/matches",
+            params={"q": "land use"},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "versionId": str(header.version_id),
+            "sections": [
+                {
+                    "anchor": "1-overview",
+                    "matches": [{"start": 21, "end": 29, "text": "land use"}],
+                },
+            ],
+        }
+
+    def test_answers_no_sections_when_nothing_matches(self, client):
+        header, _ = CLAIMS
+
+        response = client.get(
+            f"/v1/documents/{header.document_id}/matches",
+            params={"q": "woodland"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["sections"] == []
+
+    @pytest.mark.parametrize(
+        "document_id",
+        [
+            pytest.param(DRAFT_ID, id="not published"),
+            pytest.param(
+                uuid.UUID("0199b8a2-0000-7000-8000-0000000000ff"), id="unknown"
+            ),
+        ],
+    )
+    def test_is_not_found_without_a_published_version(self, client, document_id):
+        response = client.get(
+            f"/v1/documents/{document_id}/matches",
+            params={"q": "land"},
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.parametrize(
+        ("path", "params"),
+        [
+            pytest.param(
+                f"/v1/documents/{CLAIMS[0].document_id}/matches", {}, id="no q"
+            ),
+            pytest.param(
+                f"/v1/documents/{CLAIMS[0].document_id}/matches",
+                {"q": "x" * 501},
+                id="q too long",
+            ),
+            pytest.param(
+                "/v1/documents/not-a-uuid/matches", {"q": "land"}, id="bad id"
+            ),
+        ],
+    )
+    def test_refuses_a_bad_request(self, client, path, params):
+        assert client.get(path, params=params).status_code == 422
+
+    def test_never_logs_the_search_text(self, client, caplog):
+        caplog.set_level(logging.INFO)
+        caplog.handler.addFilter(log_utils.ExtraFieldsFilter())
+
+        response = client.get(
+            f"/v1/documents/{CLAIMS[0].document_id}/matches",
+            params={"q": "Jo Bloggs land"},
+        )
+
+        assert response.status_code == 200
+        service_records = [r for r in caplog.records if not r.name.startswith("httpx")]
+        assert not any(
+            "Bloggs" in record.getMessage() or "Bloggs" in str(vars(record))
+            for record in service_records
+        )
