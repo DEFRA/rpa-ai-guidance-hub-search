@@ -177,6 +177,32 @@ class TestAppConfig:
                 CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
             )
 
+    def test_refreshes_the_index_every_minute_by_default(self):
+        cfg = config.AppConfig(
+            CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
+        )
+
+        assert cfg.index_refresh_interval_seconds == 60
+
+    def test_reads_the_index_refresh_interval_from_the_environment(self, monkeypatch):
+        monkeypatch.setenv("INDEX_REFRESH_INTERVAL_SECONDS", "5")
+
+        cfg = config.AppConfig(
+            CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
+        )
+
+        assert cfg.index_refresh_interval_seconds == 5
+
+    def test_rejects_a_zero_index_refresh_interval(self, monkeypatch):
+        monkeypatch.setenv("INDEX_REFRESH_INTERVAL_SECONDS", "0")
+
+        with pytest.raises(
+            pydantic.ValidationError, match="index_refresh_interval_seconds"
+        ):
+            config.AppConfig(
+                CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
+            )
+
     def test_validator_parses_the_packed_model_config(self):
         cfg = config.AppConfig(
             CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",

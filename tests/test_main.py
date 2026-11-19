@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 
@@ -58,16 +59,35 @@ def test_lifespan(mocker):
     mocker.patch("app.common.s3.get_s3_client", return_value=mocker.sentinel.s3)
     load = mocker.patch("app.index.active_index.load", mocker.AsyncMock())
 
+    stopped = asyncio.Event()
+
+    async def poll(*_args):
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            stopped.set()
+            raise
+
+    poll_mock = mocker.patch(
+        "app.index.active_index.poll", mocker.Mock(side_effect=poll)
+    )
+
+    config = app.config.get_config()
+
     with fastapi.testclient.TestClient(app.entrypoints.fastapi.create_app()):
         mock_get_mongo.assert_called_once()
-        index_builds.assert_called_once_with(
-            database, app.config.get_config(), mocker.sentinel.s3
-        )
+        index_builds.assert_called_once_with(database, config, mocker.sentinel.s3)
         load.assert_awaited_once_with(
-            app.config.get_config().search_index_directory,
+            config.search_index_directory,
             index_builds.return_value,
         )
+        poll_mock.assert_called_once_with(
+            config.search_index_directory,
+            index_builds.return_value,
+            config.index_refresh_interval_seconds,
+        )
 
+    assert stopped.is_set()
     mock_mongo_client.close.assert_awaited_once()
 
 

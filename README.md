@@ -73,6 +73,7 @@ The `CLAUDE_SONNET_MODEL_CONFIG` format is: `model_id,inference_profile[,guardra
 | Variable | Description | Default |
 | --- | --- | --- |
 | `INGESTION_MODE` | `http` mounts the [ingestion routes](#api-endpoints) for the CMS to push document versions to; `s3` leaves them out. The `index-document` script works in both. | `http` |
+| `INDEX_REFRESH_INTERVAL_SECONDS` | How often each replica checks MongoDB for a newer active index build and swaps it in. | `60` |
 | `MAX_INLINE_CONTENT_BYTES` | The largest inline `content.markdown` an index request may carry; larger is refused with 413, and should be sent as `contentUrl` | `2097152` (2 MiB) |
 | `SEARCH_STORE_S3_BUCKET` | Where sections, staged chunk sets and index builds are kept | `rpa-ai-guidance-hub-search-store` |
 
@@ -278,7 +279,9 @@ indexing (write)   search (read)  ->  search/v1 (GET /v1/search)
   contract; a breaking change is a new `v2/` beside it.
 - **`app/index/`** is the index itself: its fields and `SCHEMA_VERSION`, the
   `ChunkIndex` protocols, the Tantivy engine, and its builds in S3 and the
-  active build in MongoDB, both keyed by schema version.
+  active build in MongoDB, both keyed by schema version. Each replica checks
+  the active build every `INDEX_REFRESH_INTERVAL_SECONDS` (default 60) and
+  swaps in a newer one.
 - **`app/matching/`** decides what counts as a match, for the engine and for
   excerpts alike.
 

@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -24,12 +26,26 @@ async def lifespan(_: fastapi.FastAPI) -> AsyncGenerator[None]:
     logger.info("MongoDB client connected")
 
     database = await mongo.get_db(client, config)
-    await active_index.load(
-        config.search_index_directory,
-        builds.get_index_build_service(database, config, s3.get_s3_client(config)),
+    index_builds = builds.get_index_build_service(
+        database, config, s3.get_s3_client(config)
+    )
+
+    await active_index.load(config.search_index_directory, index_builds)
+
+    polling = asyncio.create_task(
+        active_index.poll(
+            config.search_index_directory,
+            index_builds,
+            config.index_refresh_interval_seconds,
+        )
     )
 
     yield
+
+    polling.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await polling
+
     if client:
         await client.close()
         logger.info("MongoDB client closed")
