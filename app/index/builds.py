@@ -24,8 +24,8 @@ never wait behind them, and each file goes in a single thread (s3transfer would
 otherwise start up to 10 more per file), so at most `TRANSFER_CONCURRENCY` of the
 S3 client's pooled connections carry builds at once.
 
-Not here yet: deleting old builds, retrying a lost swap, and reloading a newer
-build into a running service.
+Not here yet: deleting old builds and retrying a lost swap. Serving replicas
+pick up a newly active build by polling (`active_index.poll`).
 """
 
 import asyncio

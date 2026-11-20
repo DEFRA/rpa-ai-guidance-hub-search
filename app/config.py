@@ -138,6 +138,7 @@ class AppConfig(pydantic_settings.BaseSettings):
     search_index_directory: pathlib.Path = (
         pathlib.Path(tempfile.gettempdir()) / "rpa-ai-guidance-hub-search"
     )
+    index_refresh_interval_seconds: float = pydantic.Field(default=60, gt=0)
     aws_region: str = pydantic.Field(
         default="eu-west-2", description="AWS region for Bedrock and other services"
     )
