@@ -102,6 +102,37 @@ class TestRefresh:
         # Kept for searches still running on it.
         assert (tmp_path / "serve" / first).is_dir()
 
+    async def test_keeps_the_previous_build_served_and_removes_a_failed_new_one(
+        self, tmp_path, mocker
+    ):
+        index_builds, first = await _published(tmp_path)
+        await active_index.load(tmp_path / "serve", index_builds)
+        served = active_index.get_chunk_index()
+
+        # A newer build is active, but downloading it fails part-way through.
+        second = await _publish_another(index_builds, tmp_path, "second")
+
+        download = index_builds.download
+
+        async def failing_download(build_id, directory):
+            if build_id == second:
+                directory.mkdir(parents=True, exist_ok=True)
+                (directory / "meta.json").write_bytes(b"partial")
+                msg = "download failed"
+                raise RuntimeError(msg)
+            return await download(build_id, directory)
+
+        mocker.patch.object(index_builds, "download", side_effect=failing_download)
+
+        with pytest.raises(RuntimeError):
+            await active_index.refresh(tmp_path / "serve", index_builds)
+
+        # The previous build is still the one served, and its partial copy on disk
+        # was cleaned up, so a later success can download into the same directory.
+        assert active_index.loaded_build_id() == first
+        assert active_index.get_chunk_index() is served
+        assert not (tmp_path / "serve" / second).exists()
+
     async def test_removes_builds_older_than_the_one_replaced(self, tmp_path):
         index_builds, _ = await _published(tmp_path)
         await active_index.load(tmp_path / "serve", index_builds)
