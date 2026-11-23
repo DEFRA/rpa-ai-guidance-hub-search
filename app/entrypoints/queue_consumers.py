@@ -6,9 +6,9 @@ messages: it hands each handler the message's event, with the event's trace id
 set for the handler's logs, and the handler raises to leave a message to be
 retried.
 
-Each is an `sqs_consumer` consumer, entered with `async with` around the app's
-`yield`, as the package's FastAPI example does. They share the app's SQS
-client, so their endpoint comes from `AppConfig` like every other client's.
+Each is an `app.common.sqs_consumer` consumer, entered with `async with` around
+the lifespan's `yield`. They share the app's SQS client, so their endpoint comes
+from `AppConfig` like every other client's.
 
 A heartbeat keeps a message hidden while its handler runs, however long that
 takes, so a slow message is never handed to another consumer meanwhile. On
@@ -19,10 +19,11 @@ flight; uvicorn's graceful shutdown is given longer (`entrypoints.fastapi`).
 from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
-import sqs_consumer
-
 from app import config as app_config
 from app.common import cloudevents, metrics, tracing
+from app.common.sqs_consumer import config as consumer_config
+from app.common.sqs_consumer import consumer, message
+from app.common.sqs_consumer import hooks as consumer_hooks
 from app.indexing import index_sync, stages
 from app.indexing.prepare import document_preparer
 from app.ingestion import models as ingestion_models
@@ -40,7 +41,7 @@ PREPARE_CONCURRENCY = 4
 Each makes one S3 call at a time, so this bounds the calls they make together.
 """
 
-HEARTBEAT = sqs_consumer.Heartbeat(interval=20, visibility_timeout=60)
+HEARTBEAT = consumer_config.Heartbeat(interval=20, visibility_timeout=60)
 """Extends a message's visibility every 20s to the queues' own 60s."""
 
 
@@ -48,8 +49,8 @@ def indexing_queue(
     config: app_config.AppConfig,
     sqs_client: SQSClient,
     s3_client: S3Client,
-    receive: sqs_consumer.Receive | None = None,
-) -> sqs_consumer.Consumer[ingestion_models.IndexingEvent]:
+    receive: consumer_config.Receive | None = None,
+) -> consumer.Consumer[ingestion_models.IndexingEvent]:
     """Consumes the indexing queue; `receive` is overridden by tests."""
     worker = preparation.PreparationWorker(
         preparer_for=_preparer_for(config, s3_client),
@@ -62,11 +63,11 @@ def indexing_queue(
         content_bucket=config.managed_docs_s3_bucket,
     )
 
-    return sqs_consumer.Consumer(
+    return consumer.Consumer(
         config.search_indexing_sqs_queue_url,
         _traced(worker.handle),
         deserializer=ingestion_models.loads,
-        receive=receive or sqs_consumer.Receive(max_messages=PREPARE_CONCURRENCY),
+        receive=receive or consumer_config.Receive(max_messages=PREPARE_CONCURRENCY),
         heartbeat=HEARTBEAT,
         shutdown_timeout=config.sqs_shutdown_timeout_seconds,
         hooks=hooks(config),
@@ -76,10 +77,10 @@ def indexing_queue(
 
 def _traced[Event: cloudevents.CloudEvent](
     handle: Callable[[Event], Awaitable[None]],
-) -> Callable[[sqs_consumer.Message[Event]], Awaitable[None]]:
+) -> Callable[[message.Message[Event]], Awaitable[None]]:
     """A message handler that runs `handle` under the event's trace id."""
 
-    async def handle_message(item: sqs_consumer.Message[Event]) -> None:
+    async def handle_message(item: message.Message[Event]) -> None:
         event = item.payload
         token = tracing.ctx_trace_id.set(event.cdprequestid or item.message_id)
 
@@ -91,17 +92,17 @@ def _traced[Event: cloudevents.CloudEvent](
     return handle_message
 
 
-def hooks(config: app_config.AppConfig) -> sqs_consumer.Hooks:
+def hooks(config: app_config.AppConfig) -> consumer_hooks.Hooks:
     """Counts each failed message, when metrics are on."""
     if not config.enable_metrics:
-        return sqs_consumer.Hooks()
+        return consumer_hooks.Hooks()
 
     async def count_failure(
-        _error: Exception, failed: Sequence[sqs_consumer.Message[Any]]
+        _error: Exception, failed: Sequence[message.Message[Any]]
     ) -> None:
         metrics.counter(FAILED_METRIC, len(failed))
 
-    return sqs_consumer.Hooks(on_processing_error=count_failure)
+    return consumer_hooks.Hooks(on_processing_error=count_failure)
 
 
 def _preparer_for(

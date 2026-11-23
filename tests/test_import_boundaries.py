@@ -7,6 +7,7 @@ import pytest
 
 APP = pathlib.Path(__file__).parent.parent / "app"
 ALLOWED = {APP / "index" / "tantivy_schema.py", APP / "index" / "tantivy_index.py"}
+SQS_CONSUMER = APP / "common" / "sqs_consumer"
 
 # The write side (indexing) and the read side (search) share `index` and
 # `matching` but never import each other; the shared packages import neither.
@@ -90,13 +91,16 @@ class TestTheQueueConsumerImports:
         offenders = [
             str(path.relative_to(APP))
             for path in APP.rglob("*.py")
-            if "entrypoints" not in path.relative_to(APP).parts
-            and "sqs_consumer" in _imports(path)
+            if not path.is_relative_to(SQS_CONSUMER)
+            and "entrypoints" not in path.relative_to(APP).parts
+            and _imports_any(path, {"app.common.sqs_consumer"})
         ]
         assert offenders == []
 
     def test_check_finds_the_consumers_module(self):
-        assert "sqs_consumer" in _imports(APP / "entrypoints" / "queue_consumers.py")
+        assert _imports_any(
+            APP / "entrypoints" / "queue_consumers.py", {"app.common.sqs_consumer"}
+        )
 
 
 class TestTheDomainImports:

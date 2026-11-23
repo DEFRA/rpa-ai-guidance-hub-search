@@ -1,10 +1,10 @@
 """The queue consumers: wired to the configured queues, as the package expects."""
 
 import pytest
-import sqs_consumer
 
 from app import config as app_config
 from app.common import cloudevents, tracing
+from app.common.sqs_consumer import message
 from app.entrypoints import queue_consumers
 from app.ingestion import models as ingestion_models
 from tests.support import events
@@ -32,7 +32,7 @@ class TestHooks:
 
 
 def _message(event, message_id="m-1"):
-    return sqs_consumer.Message.from_sqs(
+    return message.Message.from_sqs(
         {
             "MessageId": message_id,
             "ReceiptHandle": f"r-{message_id}",
