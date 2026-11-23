@@ -424,6 +424,57 @@ class TestHandlers:
         assert sqs.depth(client, queue_url) == (0, 2)
 
 
+class TestHandlerFailureLogging:
+    async def test_a_failure_is_logged_when_no_error_hook_is_set(
+        self,
+        client: sqs_client.SQSClient,
+        queue_url: str,
+        caplog: pytest.LogCaptureFixture,
+    ):
+        consumers.send(client, queue_url, "a")
+
+        async def explode(_item: message.Message) -> None:
+            msg = "handler bug"
+            raise RuntimeError(msg)
+
+        subject = consumers.build(queue_url, client=client, handler=explode)
+        with caplog.at_level(logging.ERROR, logger="app.common.sqs_consumer"):
+            async with subject:
+                await sqs.wait_for(lambda: "sqs handler failed" in caplog.text)
+
+        record = next(r for r in caplog.records if "sqs handler failed" in r.message)
+        assert record.exc_info is not None
+        assert "handler bug" in str(record.exc_info[1])
+
+    async def test_a_failure_is_not_logged_twice_when_an_error_hook_is_set(
+        self,
+        client: sqs_client.SQSClient,
+        queue_url: str,
+        caplog: pytest.LogCaptureFixture,
+    ):
+        consumers.send(client, queue_url, "a")
+        seen: list[Exception] = []
+
+        async def explode(_item: message.Message) -> None:
+            msg = "handler bug"
+            raise RuntimeError(msg)
+
+        async def on_error(exc: Exception, _group: list[message.Message]) -> None:
+            seen.append(exc)
+
+        subject = consumers.build(
+            queue_url,
+            client=client,
+            handler=explode,
+            hooks=hooks.Hooks(on_processing_error=on_error),
+        )
+        with caplog.at_level(logging.ERROR, logger="app.common.sqs_consumer"):
+            async with subject:
+                await sqs.wait_for(lambda: len(seen) >= 1)
+
+        assert "sqs handler failed" not in caplog.text
+
+
 class TestHooks:
     async def test_a_failing_hook_is_logged_and_does_not_stop_processing(
         self,
@@ -614,6 +665,7 @@ class TestLifecycle:
     async def test_a_poll_abandoned_by_stop_releases_what_it_later_receives(
         self, client: sqs_client.SQSClient, queue_url: str
     ):
+        operations = sqs.record_operations(client)
         subject = consumers.build(
             queue_url,
             client=client,
@@ -625,6 +677,10 @@ class TestLifecycle:
         await subject.stop(shutdown_timeout=0.1)
 
         consumers.send(client, queue_url, "late")
+
+        # Wait for the abandoned poll to receive and release the message, so the
+        # assertion reader cannot win it and see a receive count of 1.
+        await sqs.wait_for(lambda: "ChangeMessageVisibilityBatch" in operations)
 
         redelivered = await sqs.receive_eventually(client, queue_url)
         assert redelivered["Body"] == "late"

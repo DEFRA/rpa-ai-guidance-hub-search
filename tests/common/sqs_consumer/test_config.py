@@ -47,6 +47,12 @@ class TestBackoff:
 
         assert delays == [1, 2, 4, 5, 5]
 
+    def test_delay_saturates_at_the_maximum_when_the_exponent_overflows(self):
+        backoff = config.Backoff(initial=1, maximum=60, factor=2, jitter=False)
+
+        assert backoff.delay(1025) == 60
+        assert backoff.delay(10**6) == 60
+
     def test_jittered_delay_stays_between_zero_and_the_ceiling(self):
         backoff = config.Backoff(initial=1, maximum=5, factor=2, jitter=True)
 

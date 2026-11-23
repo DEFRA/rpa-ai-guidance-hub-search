@@ -131,6 +131,11 @@ class Backoff:
         Returns:
             The delay in seconds, randomised if jitter is on.
         """
-        ceiling = min(self.maximum, self.initial * self.factor ** (failures - 1))
+        try:
+            ceiling = min(self.maximum, self.initial * self.factor ** (failures - 1))
+        except OverflowError:
+            # The exponent outgrew a float: the wait has long since hit the cap.
+            ceiling = self.maximum
+
         # Jitter, not security, so the non-cryptographic generator is fine.
         return random.uniform(0, ceiling) if self.jitter else ceiling  # noqa: S311

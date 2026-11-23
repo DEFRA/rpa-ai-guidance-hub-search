@@ -416,6 +416,12 @@ class _BaseConsumer[T](abc.ABC):
                     ", ".join(m.message_id for m in group),
                     exc.delay,
                 )
+            elif settings.hooks.on_processing_error is None:
+                settings.logger.error(
+                    "sqs handler failed for %s",
+                    ", ".join(m.message_id for m in group),
+                    exc_info=exc,
+                )
 
             await self._emit(settings.hooks.on_processing_error, exc, group)
 

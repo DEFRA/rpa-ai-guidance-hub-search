@@ -126,3 +126,67 @@ class TestRun:
         assert len(reports.denied) == 1
         assert gateway.is_access_denied(reports.denied[0])
         assert reports.errors == []
+
+
+class SlowQueue:
+    """A queue whose visibility change finishes only when `release` is set."""
+
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.finished = False
+
+    async def change_visibility(self, _messages: object, _timeout: int) -> None:
+        self.started.set()
+        await self.release.wait()
+        self.finished = True
+
+
+class TestCancel:
+    async def test_waits_for_an_in_flight_request_before_returning(self):
+        queue = SlowQueue()
+        reports = Reports()
+        beat = asyncio.create_task(
+            heartbeat.run(
+                queue,  # type: ignore[arg-type]
+                [],
+                config.Heartbeat(interval=0.01, visibility_timeout=5),
+                report=reports.report,
+                denied=reports.deny,
+            )
+        )
+        await asyncio.wait_for(queue.started.wait(), timeout=5)
+
+        beat.cancel()
+        await asyncio.sleep(0.1)
+
+        assert not beat.done()
+
+        queue.release.set()
+        await asyncio.wait({beat}, timeout=5)
+
+        assert beat.cancelled()
+        assert queue.finished
+        assert reports.errors == []
+
+    async def test_a_second_cancel_ends_the_wait(self):
+        queue = SlowQueue()
+        reports = Reports()
+        beat = asyncio.create_task(
+            heartbeat.run(
+                queue,  # type: ignore[arg-type]
+                [],
+                config.Heartbeat(interval=0.01, visibility_timeout=5),
+                report=reports.report,
+                denied=reports.deny,
+            )
+        )
+        await asyncio.wait_for(queue.started.wait(), timeout=5)
+
+        beat.cancel()
+        await asyncio.sleep(0.05)
+        beat.cancel()
+        await asyncio.wait({beat}, timeout=5)
+
+        assert beat.cancelled()
+        assert not queue.finished
