@@ -29,7 +29,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "debugpy==1.8.22",
-    "moto[s3]==5.2.5",
+    "moto[s3,sqs]==5.2.5",
     "mypy==2.4.1",
     "pre-commit==4.7.0",
     "pytest==9.2.0",
@@ -41,7 +41,7 @@ dev = [
     "taskipy==1.14.1",
     "testcontainers==4.15.0",
     "types-aiofiles==25.1.0.20260518",
-    "types-boto3[s3]==1.43.124",
+    "types-boto3[s3,sqs]==1.43.124",
 ]
 
 [project.scripts]

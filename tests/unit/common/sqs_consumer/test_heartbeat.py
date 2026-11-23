@@ -1,0 +1,201 @@
+import asyncio
+import concurrent.futures
+from collections.abc import Iterator
+
+import boto3
+import botocore.exceptions
+import botocore.stub
+import pytest
+from types_boto3_sqs import client as sqs_client
+
+from app.common.sqs_consumer import config, gateway, heartbeat, message
+from tests.unit.common.sqs_consumer.support import iam
+
+
+@pytest.fixture
+def pool() -> Iterator[concurrent.futures.ThreadPoolExecutor]:
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+    yield executor
+    executor.shutdown()
+
+
+class Reports:
+    def __init__(self) -> None:
+        self.errors: list[Exception] = []
+        self.denied: list[Exception] = []
+
+    def report(self, exc: Exception) -> None:
+        self.errors.append(exc)
+
+    def deny(self, exc: Exception) -> None:
+        self.denied.append(exc)
+
+
+async def receive_one(
+    queue: gateway.Gateway, visibility_timeout: int
+) -> list[message.Message]:
+    raws = await queue.receive(
+        config.Receive(wait_time_seconds=0, visibility_timeout=visibility_timeout),
+        orphan_release_timeout=None,
+    )
+    return [message.Message.from_sqs(raw) for raw in raws]
+
+
+class TestRun:
+    async def test_keeps_a_message_invisible_beyond_its_original_timeout(
+        self, client: sqs_client.SQSClient, queue_url: str, pool
+    ):
+        client.send_message(QueueUrl=queue_url, MessageBody="slow")
+        queue = gateway.Gateway(client, queue_url, pool)
+        received = await receive_one(queue, visibility_timeout=1)
+        reports = Reports()
+        beat = asyncio.create_task(
+            heartbeat.run(
+                queue,
+                received,
+                config.Heartbeat(interval=0.3, visibility_timeout=5),
+                finished=asyncio.Event(),
+                report=reports.report,
+                denied=reports.deny,
+            )
+        )
+
+        await asyncio.sleep(1.8)
+        beat.cancel()
+
+        assert client.receive_message(QueueUrl=queue_url).get("Messages") is None
+        assert reports.errors == []
+
+    async def test_reports_a_transient_failure_and_extends_on_the_next_tick(self, pool):
+        client = boto3.client("sqs")
+        queue = gateway.Gateway(client, "http://queue", pool)
+        received = [message.Message.from_sqs({"MessageId": "1", "ReceiptHandle": "r"})]
+        reports = Reports()
+        with botocore.stub.Stubber(client) as stubber:
+            stubber.add_client_error(
+                "change_message_visibility_batch", service_error_code="Throttling"
+            )
+            stubber.add_response(
+                "change_message_visibility_batch",
+                {"Successful": [{"Id": "0"}], "Failed": []},
+            )
+            beat = asyncio.create_task(
+                heartbeat.run(
+                    queue,
+                    received,
+                    config.Heartbeat(interval=0.05, visibility_timeout=5),
+                    finished=asyncio.Event(),
+                    report=reports.report,
+                    denied=reports.deny,
+                )
+            )
+
+            await asyncio.sleep(0.4)
+            beat.cancel()
+
+            stubber.assert_no_pending_responses()
+
+        first = reports.errors[0]
+        assert isinstance(first, botocore.exceptions.ClientError)
+        assert first.response["Error"]["Code"] == "Throttling"
+        assert reports.denied == []
+
+    async def test_stops_and_hands_over_the_error_when_access_is_denied(
+        self,
+        client: sqs_client.SQSClient,
+        queue_url: str,
+        iam_enforcement: iam.IamEnforcement,
+        pool,
+    ):
+        client.send_message(QueueUrl=queue_url, MessageBody="x")
+        limited = iam.create_limited_client(["sqs:ReceiveMessage"])
+        queue = gateway.Gateway(limited, queue_url, pool)
+        iam_enforcement.enable()
+        received = await receive_one(queue, visibility_timeout=30)
+        reports = Reports()
+
+        await asyncio.wait_for(
+            heartbeat.run(
+                queue,
+                received,
+                config.Heartbeat(interval=0.05, visibility_timeout=5),
+                finished=asyncio.Event(),
+                report=reports.report,
+                denied=reports.deny,
+            ),
+            timeout=5,
+        )
+
+        assert len(reports.denied) == 1
+        assert gateway.is_access_denied(reports.denied[0])
+        assert reports.errors == []
+
+
+class SlowQueue:
+    """A queue whose visibility change finishes only when `release` is set."""
+
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.finished = False
+
+    async def change_visibility(self, _messages: object, _timeout: int) -> None:
+        self.started.set()
+        await self.release.wait()
+        self.finished = True
+
+
+class TestStopping:
+    def start(
+        self, queue: SlowQueue, reports: Reports, finished: asyncio.Event
+    ) -> asyncio.Task[None]:
+        return asyncio.create_task(
+            heartbeat.run(
+                queue,  # type: ignore[arg-type]
+                [],
+                config.Heartbeat(interval=0.01, visibility_timeout=5),
+                finished=finished,
+                report=reports.report,
+                denied=reports.deny,
+            )
+        )
+
+    async def test_finishing_waits_for_an_in_flight_request(self):
+        queue = SlowQueue()
+        reports = Reports()
+        finished = asyncio.Event()
+        beat = self.start(queue, reports, finished)
+        await asyncio.wait_for(queue.started.wait(), timeout=5)
+
+        finished.set()
+        await asyncio.sleep(0.1)
+
+        assert not beat.done()
+
+        queue.release.set()
+        await asyncio.wait_for(beat, timeout=5)
+
+        assert queue.finished
+        assert reports.errors == []
+
+    async def test_finishing_between_ticks_returns_without_another_request(self):
+        queue = SlowQueue()
+        reports = Reports()
+        finished = asyncio.Event()
+        finished.set()
+
+        await asyncio.wait_for(self.start(queue, reports, finished), timeout=5)
+
+        assert not queue.started.is_set()
+
+    async def test_cancelling_abandons_an_in_flight_request(self):
+        queue = SlowQueue()
+        reports = Reports()
+        beat = self.start(queue, reports, asyncio.Event())
+        await asyncio.wait_for(queue.started.wait(), timeout=5)
+
+        beat.cancel()
+        await asyncio.wait({beat}, timeout=5)
+
+        assert beat.cancelled()
+        assert not queue.finished
