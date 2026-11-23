@@ -20,17 +20,17 @@ channels:
       and dead-lettered after 3 receives. An event of a type search doesn't read is acknowledged
       and ignored.
     messages:
-      guideVersionDeleted:
-        $ref: '#/components/messages/guideVersionDeleted'
-      guideVersionPublished:
-        $ref: '#/components/messages/guideVersionPublished'
+      guideVersionDeletedV1:
+        $ref: '#/components/messages/guideVersionDeletedV1'
+      guideVersionPublishedV1:
+        $ref: '#/components/messages/guideVersionPublishedV1'
     title: Indexing queue
 components:
   messages:
-    guideVersionDeleted:
+    guideVersionDeletedV1:
       contentType: application/cloudevents+json
       examples:
-      - name: Guide version deleted
+      - name: Guide version deleted (v1)
         payload:
           data:
             documentId: 0199b8a2-0000-7000-8000-00000000f001
@@ -45,13 +45,13 @@ components:
           type: uk.gov.defra.rpa.guidancehub.guide.version.deleted
       name: uk.gov.defra.rpa.guidancehub.guide.version.deleted
       payload:
-        $ref: '#/components/schemas/GuideVersionDeleted'
+        $ref: '#/components/schemas/GuideVersionDeletedV1'
       summary: A version of a guide was deleted, at every status.
-      title: Guide version deleted
-    guideVersionPublished:
+      title: Guide version deleted (v1)
+    guideVersionPublishedV1:
       contentType: application/cloudevents+json
       examples:
-      - name: Guide version published
+      - name: Guide version published (v1)
         payload:
           data:
             contentUrl: s3://rpa-ai-guidance-hub-managed-docs/0199b8a2-0000-7000-8000-00000000f001/0199b8a2-0000-7000-8000-00000000f002/content.md
@@ -76,73 +76,27 @@ components:
           type: uk.gov.defra.rpa.guidancehub.guide.version.published
       name: uk.gov.defra.rpa.guidancehub.guide.version.published
       payload:
-        $ref: '#/components/schemas/GuideVersionPublished'
+        $ref: '#/components/schemas/GuideVersionPublishedV1'
       summary: A version of a guide was published, so it should be what search finds.
-      title: Guide version published
+      title: Guide version published (v1)
   schemas:
-    GuideMetadata:
-      description: The CMS's metadata; `guideTitle` is required, and is the indexed title.
+    GuideVersionDeletedDataV1:
+      $id: urn:defra:rpa-ai-guidance-hub:events:guide-version-deleted:v1
       properties:
-        audience:
-          default: []
-          items:
-            type: string
-          title: Audience
-          type: array
-        goal:
-          anyOf:
-          - type: string
-          - type: 'null'
-          default: null
-          title: Goal
-        guidanceType:
-          anyOf:
-          - type: string
-          - items:
-              type: string
-            type: array
-          - type: 'null'
-          default: null
-          title: Guidancetype
-        guideTitle:
-          minLength: 1
-          title: Guidetitle
+        documentId:
+          format: uuid
+          title: Documentid
           type: string
-        owner:
-          anyOf:
-          - type: string
-          - type: 'null'
-          default: null
-          title: Owner
-        requirements:
-          anyOf:
-          - type: string
-          - type: 'null'
-          default: null
-          title: Requirements
-        schemeYear:
-          anyOf:
-          - type: integer
-          - type: 'null'
-          default: null
-          title: Schemeyear
-        schemes:
-          default: []
-          items:
-            type: string
-          title: Schemes
-          type: array
-        systems:
-          default: []
-          items:
-            type: string
-          title: Systems
-          type: array
+        versionId:
+          format: uuid
+          title: Versionid
+          type: string
       required:
-      - guideTitle
-      title: GuideMetadata
+      - documentId
+      - versionId
+      title: GuideVersionDeletedDataV1
       type: object
-    GuideVersionDeleted:
+    GuideVersionDeletedV1:
       description: A version of a guide was deleted, at every status.
       properties:
         cdprequestid:
@@ -196,25 +150,108 @@ components:
       - time
       - dataschema
       - data
-      title: GuideVersionDeleted
+      title: GuideVersionDeletedV1
       type: object
-    GuideVersionDeletedDataV1:
-      $id: urn:defra:rpa-ai-guidance-hub:events:guide-version-deleted:v1
+    GuideVersionPublishedDataV1:
+      $id: urn:defra:rpa-ai-guidance-hub:events:guide-version-published:v1
       properties:
+        contentUrl:
+          title: Contenturl
+          type: string
         documentId:
           format: uuid
           title: Documentid
+          type: string
+        metadata:
+          description: The CMS's metadata; `guideTitle` is required, and is the indexed title.
+          properties:
+            audience:
+              default: []
+              items:
+                type: string
+              title: Audience
+              type: array
+            goal:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              title: Goal
+            guidanceType:
+              anyOf:
+              - type: string
+              - items:
+                  type: string
+                type: array
+              - type: 'null'
+              default: null
+              title: Guidancetype
+            guideTitle:
+              minLength: 1
+              title: Guidetitle
+              type: string
+            owner:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              title: Owner
+            requirements:
+              anyOf:
+              - type: string
+              - type: 'null'
+              default: null
+              title: Requirements
+            schemeYear:
+              anyOf:
+              - type: integer
+              - type: 'null'
+              default: null
+              title: Schemeyear
+            schemes:
+              default: []
+              items:
+                type: string
+              title: Schemes
+              type: array
+            systems:
+              default: []
+              items:
+                type: string
+              title: Systems
+              type: array
+          required:
+          - guideTitle
+          title: GuideMetadata
+          type: object
+        sourceType:
+          const: guide
+          title: Sourcetype
+          type: string
+        status:
+          const: published
+          title: Status
           type: string
         versionId:
           format: uuid
           title: Versionid
           type: string
+        versionNumber:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Versionnumber
       required:
       - documentId
       - versionId
-      title: GuideVersionDeletedDataV1
+      - sourceType
+      - status
+      - contentUrl
+      - metadata
+      title: GuideVersionPublishedDataV1
       type: object
-    GuideVersionPublished:
+    GuideVersionPublishedV1:
       description: A version of a guide was published, so it should be what search finds.
       properties:
         cdprequestid:
@@ -268,46 +305,7 @@ components:
       - time
       - dataschema
       - data
-      title: GuideVersionPublished
-      type: object
-    GuideVersionPublishedDataV1:
-      $id: urn:defra:rpa-ai-guidance-hub:events:guide-version-published:v1
-      properties:
-        contentUrl:
-          title: Contenturl
-          type: string
-        documentId:
-          format: uuid
-          title: Documentid
-          type: string
-        metadata:
-          $ref: '#/components/schemas/GuideMetadata'
-        sourceType:
-          const: guide
-          title: Sourcetype
-          type: string
-        status:
-          const: published
-          title: Status
-          type: string
-        versionId:
-          format: uuid
-          title: Versionid
-          type: string
-        versionNumber:
-          anyOf:
-          - type: string
-          - type: 'null'
-          default: null
-          title: Versionnumber
-      required:
-      - documentId
-      - versionId
-      - sourceType
-      - status
-      - contentUrl
-      - metadata
-      title: GuideVersionPublishedDataV1
+      title: GuideVersionPublishedV1
       type: object
 defaultContentType: application/cloudevents+json
 info:
@@ -326,15 +324,15 @@ operations:
     channel:
       $ref: '#/channels/indexing'
     messages:
-    - $ref: '#/channels/indexing/messages/guideVersionPublished'
-    - $ref: '#/channels/indexing/messages/guideVersionDeleted'
+    - $ref: '#/channels/indexing/messages/guideVersionPublishedV1'
+    - $ref: '#/channels/indexing/messages/guideVersionDeletedV1'
     summary: The preparation worker prepares or removes each version.
   sendIndexingEvent:
     action: send
     channel:
       $ref: '#/channels/indexing'
     messages:
-    - $ref: '#/channels/indexing/messages/guideVersionPublished'
-    - $ref: '#/channels/indexing/messages/guideVersionDeleted'
+    - $ref: '#/channels/indexing/messages/guideVersionPublishedV1'
+    - $ref: '#/channels/indexing/messages/guideVersionDeletedV1'
     summary: Search's ingestion routes send an event for each request, until the API publishes
       them.

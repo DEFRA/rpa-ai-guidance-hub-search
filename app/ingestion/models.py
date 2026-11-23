@@ -47,6 +47,7 @@ class GuideMetadata(guide_cms.CmsGuideMetadata):
 
 def _s3_url(url: str) -> str:
     guide_content.parse_s3_url(url)
+
     return url
 
 
@@ -76,7 +77,7 @@ class GuideVersionDeletedDataV1(_DataModel):
     version_id: guide_cms.CmsId
 
 
-class GuideVersionPublished(cloudevents.CloudEvent):
+class GuideVersionPublishedV1(cloudevents.KnownEvent):
     """A version of a guide was published, so it should be what search finds."""
 
     type: Literal["uk.gov.defra.rpa.guidancehub.guide.version.published"]
@@ -117,7 +118,7 @@ class GuideVersionPublished(cloudevents.CloudEvent):
         )
 
 
-class GuideVersionDeleted(cloudevents.CloudEvent):
+class GuideVersionDeletedV1(cloudevents.KnownEvent):
     """A version of a guide was deleted, at every status."""
 
     type: Literal["uk.gov.defra.rpa.guidancehub.guide.version.deleted"]
@@ -140,18 +141,24 @@ class GuideVersionDeleted(cloudevents.CloudEvent):
         )
 
 
-GuideEvent = GuideVersionPublished | GuideVersionDeleted
+GuideEvent = GuideVersionPublishedV1 | GuideVersionDeletedV1
 """An event the ingestion routes send."""
 
+KNOWN_EVENTS: Final = (GuideVersionPublishedV1, GuideVersionDeletedV1)
+"""Every version of every type the indexing queue's reader reads."""
+
 IndexingEvent = Annotated[
-    Annotated[GuideVersionPublished, pydantic.Tag(GUIDE_VERSION_PUBLISHED)]
-    | Annotated[GuideVersionDeleted, pydantic.Tag(GUIDE_VERSION_DELETED)]
+    Annotated[GuideVersionPublishedV1, pydantic.Tag(GuideVersionPublishedV1.tag())]
+    | Annotated[GuideVersionDeletedV1, pydantic.Tag(GuideVersionDeletedV1.tag())]
     | Annotated[cloudevents.UnknownEvent, pydantic.Tag(cloudevents.UNKNOWN)],
-    pydantic.Discriminator(
-        cloudevents.type_of({GUIDE_VERSION_PUBLISHED, GUIDE_VERSION_DELETED})
-    ),
+    cloudevents.discriminator(KNOWN_EVENTS),
 ]
-"""Any event on the indexing queue."""
+"""Any event on the indexing queue.
+
+Each version of a type is a model of its own, tagged by its `type` and
+`dataschema`. A new version is a new model here and in `KNOWN_EVENTS`,
+converting to the same version-neutral job as the versions before it.
+"""
 
 _EVENTS: pydantic.TypeAdapter[IndexingEvent] = pydantic.TypeAdapter(IndexingEvent)
 
@@ -165,7 +172,7 @@ def message_attributes(event: GuideEvent) -> dict[str, str]:
     """Copies of a few attributes, for filtering; the body is authoritative."""
     values = {"type": event.type, "documentId": str(event.document_id)}
 
-    if isinstance(event, GuideVersionPublished):
+    if isinstance(event, GuideVersionPublishedV1):
         values["sourceType"] = event.data.source_type.value
 
     return values
@@ -179,9 +186,9 @@ def guide_version_published(
     data: GuideVersionPublishedDataV1,
     time: dt.datetime,
     trace_id: str | None = None,
-) -> GuideVersionPublished:
+) -> GuideVersionPublishedV1:
     """A new event, as the ingestion routes send it."""
-    return GuideVersionPublished(
+    return GuideVersionPublishedV1(
         specversion=cloudevents.SPEC_VERSION,
         type=GUIDE_VERSION_PUBLISHED,
         dataschema=GUIDE_VERSION_PUBLISHED_V1,
@@ -198,9 +205,9 @@ def guide_version_deleted(
     data: GuideVersionDeletedDataV1,
     time: dt.datetime,
     trace_id: str | None = None,
-) -> GuideVersionDeleted:
+) -> GuideVersionDeletedV1:
     """A new event, as the ingestion routes send it."""
-    return GuideVersionDeleted(
+    return GuideVersionDeletedV1(
         specversion=cloudevents.SPEC_VERSION,
         type=GUIDE_VERSION_DELETED,
         dataschema=GUIDE_VERSION_DELETED_V1,

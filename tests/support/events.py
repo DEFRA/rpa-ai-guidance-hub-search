@@ -16,7 +16,7 @@ def published(
     document_id: ids.DocumentId = guides.DOCUMENT_ID,
     version_id: ids.VersionId = guides.VERSION_ID,
     trace_id: str | None = None,
-) -> ingestion_models.GuideVersionPublished:
+) -> ingestion_models.GuideVersionPublishedV1:
     data = ingestion_models.GuideVersionPublishedDataV1.model_validate(
         {
             "documentId": str(document_id),
@@ -28,6 +28,7 @@ def published(
             "metadata": {"guideTitle": TITLE, "owner": "Schemes team"},
         },
     )
+
     return ingestion_models.guide_version_published(data, TIME, trace_id)
 
 
@@ -36,8 +37,9 @@ def deleted(
     document_id: ids.DocumentId = guides.DOCUMENT_ID,
     version_id: ids.VersionId = guides.VERSION_ID,
     trace_id: str | None = None,
-) -> ingestion_models.GuideVersionDeleted:
+) -> ingestion_models.GuideVersionDeletedV1:
     data = ingestion_models.GuideVersionDeletedDataV1(
         document_id=document_id, version_id=version_id
     )
+
     return ingestion_models.guide_version_deleted(data, TIME, trace_id)

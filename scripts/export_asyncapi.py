@@ -5,8 +5,9 @@ import argparse
 import datetime as dt
 import json
 import sys
+import pathlib
 import uuid
-from pathlib import Path
+from collections.abc import Iterator
 from typing import Any
 
 import yaml
@@ -15,7 +16,7 @@ from pydantic import json_schema
 from app.common import cloudevents
 from app.ingestion import models as ingestion_models
 
-ASYNCAPI_PATH = Path(__file__).resolve().parent.parent / "docs" / "asyncapi.json"
+ASYNCAPI_PATH = pathlib.Path(__file__).resolve().parent.parent / "docs" / "asyncapi.json"
 
 ASYNCAPI_VERSION = "3.0.0"
 DOCUMENT_VERSION = "1.0.0"
@@ -127,35 +128,27 @@ def _sqs_binding() -> dict[str, Any]:
 
 
 def _messages() -> dict[str, Any]:
-    published = ingestion_models.GuideVersionPublished
-    deleted = ingestion_models.GuideVersionDeleted
-
     return {
-        "guideVersionPublished": _message(
-            ingestion_models.GUIDE_VERSION_PUBLISHED,
-            "Guide version published",
-            published,
+        "guideVersionPublishedV1": _message(
+            "Guide version published (v1)",
+            ingestion_models.GuideVersionPublishedV1,
             _published_example(),
         ),
-        "guideVersionDeleted": _message(
-            ingestion_models.GUIDE_VERSION_DELETED,
-            "Guide version deleted",
-            deleted,
+        "guideVersionDeletedV1": _message(
+            "Guide version deleted (v1)",
+            ingestion_models.GuideVersionDeletedV1,
             _deleted_example(),
         ),
     }
 
 
 def _message(
-    event_type: str,
     title: str,
-    model: type[ingestion_models.GuideVersionPublished]
-    | type[ingestion_models.GuideVersionDeleted],
-    example: ingestion_models.GuideVersionPublished
-    | ingestion_models.GuideVersionDeleted,
+    model: type[ingestion_models.GuideEvent],
+    example: ingestion_models.GuideEvent,
 ) -> dict[str, Any]:
     return {
-        "name": event_type,
+        "name": model.TYPE,
         "title": title,
         "summary": (model.__doc__ or "").strip(),
         "contentType": cloudevents.CONTENT_TYPE,
@@ -167,20 +160,89 @@ def _message(
 
 
 def _schemas() -> dict[str, Any]:
-    """Every model's schema, its references pointing into `components.schemas`."""
+    """Each event's schema, and the schemas they refer to in `components.schemas`.
+
+    A data schema has its URN as its `$id`, which makes it a resource of its own:
+    to JSON Schema a `$ref` inside it resolves against the URN, while AsyncAPI's
+    parser resolves it against this document. So each is generated alone, with
+    what it refers to inlined, leaving no reference for either to resolve.
+    """
+    events = ingestion_models.KNOWN_EVENTS
+
     _, definitions = json_schema.models_json_schema(
-        [
-            (ingestion_models.GuideVersionPublished, "validation"),
-            (ingestion_models.GuideVersionDeleted, "validation"),
-        ],
+        [(event, "validation") for event in events],
         by_alias=True,
         ref_template=SCHEMAS,
     )
     schemas: dict[str, Any] = definitions["$defs"]
-    return schemas
+
+    for event in events:
+        data_model = event.model_fields["data"].annotation
+        schemas[data_model.__name__] = _inlined(
+            data_model.model_json_schema(by_alias=True)
+        )
+
+    used = _reachable(schemas, [event.__name__ for event in events])
+
+    return {name: schema for name, schema in schemas.items() if name in used}
 
 
-def _published_example() -> ingestion_models.GuideVersionPublished:
+def _inlined(schema: dict[str, Any]) -> dict[str, Any]:
+    """The schema with each `#/$defs/…` reference replaced by its definition."""
+    definitions = schema.pop("$defs", {})
+
+    def inline(node: Any) -> Any:
+        if isinstance(node, list):
+            return [inline(value) for value in node]
+
+        if not isinstance(node, dict):
+            return node
+
+        ref = node.get("$ref")
+
+        if isinstance(ref, str) and ref.startswith("#/$defs/"):
+            return inline(definitions[ref.removeprefix("#/$defs/")])
+
+        return {key: inline(value) for key, value in node.items()}
+
+    inlined: dict[str, Any] = inline(schema)
+
+    return inlined
+
+
+def _reachable(schemas: dict[str, Any], roots: list[str]) -> set[str]:
+    """The schemas `roots` refer to through `components.schemas`, and themselves."""
+    seen: set[str] = set()
+    pending = list(roots)
+
+    while pending:
+        name = pending.pop()
+
+        if name not in seen:
+            seen.add(name)
+            pending.extend(_component_refs(schemas[name]))
+
+    return seen
+
+
+def _component_refs(node: Any) -> Iterator[str]:
+    prefix = SCHEMAS.format(model="")
+
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+
+        if isinstance(ref, str) and ref.startswith(prefix):
+            yield ref.removeprefix(prefix)
+
+        for value in node.values():
+            yield from _component_refs(value)
+
+    elif isinstance(node, list):
+        for value in node:
+            yield from _component_refs(value)
+
+
+def _published_example() -> ingestion_models.GuideVersionPublishedV1:
     data = ingestion_models.GuideVersionPublishedDataV1.model_validate(
         {
             "documentId": str(EXAMPLE_DOCUMENT_ID),
@@ -196,14 +258,16 @@ def _published_example() -> ingestion_models.GuideVersionPublished:
         },
     )
     event = ingestion_models.guide_version_published(data, EXAMPLE_TIME)
+
     return event.model_copy(update={"id": EXAMPLE_EVENT_ID})
 
 
-def _deleted_example() -> ingestion_models.GuideVersionDeleted:
+def _deleted_example() -> ingestion_models.GuideVersionDeletedV1:
     data = ingestion_models.GuideVersionDeletedDataV1(
         document_id=EXAMPLE_DOCUMENT_ID, version_id=EXAMPLE_VERSION_ID
     )
     event = ingestion_models.guide_version_deleted(data, EXAMPLE_TIME)
+
     return event.model_copy(update={"id": EXAMPLE_EVENT_ID})
 
 

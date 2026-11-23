@@ -12,10 +12,8 @@ This is work-in-progress. See [To Do List](./TODO.md)
     - [Development](#development)
     - [Testing](#testing)
     - [Production Mode](#production-mode)
-  - [Where code goes](#where-code-goes)
-    - [Schemas and models](#schemas-and-models)
-    - [Ids](#ids)
   - [API endpoints](#api-endpoints)
+  - [The indexing queue's events](#the-indexing-queues-events)
   - [Custom Cloudwatch Metrics](#custom-cloudwatch-metrics)
   - [Pipelines](#pipelines)
     - [Dependabot](#dependabot)
@@ -236,97 +234,6 @@ To test the application run:
 uv run pytest
 ```
 
-## Where code goes
-
-### Domains
-
-```text
-prepare:  source reader -> SourceDocument -> sectioning -> SectionRecord (stored)
-                                                               |
-                         chunking strategy -> ChunkSet (staged) -> ApplyJob
-apply:    ApplyJob -> staged ChunkSet -> index build (published)
-
-indexing (write)   search (read)  ->  search/v1 (GET /v1/search)
-        \              /
-     records, index, matching
-```
-
-- **`app/records/`** is the canonical, source-neutral model: a
-  `DocumentHeader` per version (with the `url` a reader views it at, and
-  `source`, the source's own details typed per source type in
-  `source_metadata`: `GuideMetadata` today),
-  `SectionRecord`s (whole sections, kept as blocks, with a section
-  `content_hash`) and the `ChunkRecord`s a strategy derives from them. Sections
-  are stored as `sections/{documentId}/{versionId}.jsonl`, and are what every
-  rebuild starts from. A `ChunkSet` is one strategy's chunks of one version at
-  one status, staged as `staged/{strategy}/{documentId}/{versionId}/{status}.jsonl`
-  for the apply step.
-- **Ids**: every document and version id is a UUID. Guides use the CMS's
-  (always UUIDv7). A source without its own, such as GOV.UK content, mints
-  deterministic UUIDv5s under its own namespace (`ids.minted_id`), so the
-  same content always gets the same ids and sources never collide.
-- **`app/indexing/`** indexes a version in two steps (`stages.py`), so that
-  preparing can later scale out while a single writer applies:
-  - **`prepare/`** turns an `IndexJob` into an `ApplyJob`. A `SourceReader` per
-    source type reads one version into a `SourceDocument` (a guide's
-    `content.md` today, with `guide_cms` modelling the CMS API's guide and
-    its metadata; GOV.UK content items would be another reader with their
-    own Content API models and metadata type), `sectioning`
-    makes the canonical sections, and a named `ChunkingStrategy` (`packed-800-v2`
-    for the keyword index) chunks them. `DocumentPreparer` stores the sections
-    and stages the chunk set. It never touches the index.
-  - **`apply/`** writes an `ApplyJob`'s staged chunk set to the index.
-    `DocumentApplier` refuses chunks from any strategy but
-    `index_schema.CHUNK_STRATEGY`, and `publish` applies a job to the active
-    build and publishes the result. It never reads a source or chunks.
-- **`app/search/`** answers queries from the index. `app/search/v1/` is the HTTP
-  contract; a breaking change is a new `v2/` beside it.
-- **`app/index/`** is the index itself: its fields and `SCHEMA_VERSION`, the
-  `ChunkIndex` protocols, the Tantivy engine, and its builds in S3 and the
-  active build in MongoDB, both keyed by schema version. Each replica checks
-  the active build every `INDEX_REFRESH_INTERVAL_SECONDS` (default 60) and
-  swaps in a newer one.
-- **`app/matching/`** decides what counts as a match, for the engine and for
-  excerpts alike.
-
-Indexing and search never import each other.
-
-### Schemas and models
-
-Each layer knows only the one directly below it:
-
-```text
-HTTP JSON  <-  schemas.py   Pydantic: from_model() and conversions to models
-                   |
-               models.py    dataclasses and enums: to_document() / from_document()
-                   |
-               Mongo record (a dict)
-```
-
-- **`schemas.py`** holds the shapes that cross the HTTP boundary: request bodies,
-  response bodies, and payloads other services send us (such as cdp-uploader's
-  callback). They are Pydantic, which validates them, writes them into the OpenAPI
-  document and spells them in camelCase on the wire. A schema converts to and from
-  models, and knows nothing of how anything is stored.
-- **`models.py`** holds what the service works with: plain dataclasses and enums,
-  with no HTTP in them. A model converts itself to and from the record Mongo stores
-  (`to_document()` and `from_document()`), so the stored field names are written
-  down once. A model never imports a schema.
-- **Routers** only call the conversions; they don't build shapes themselves.
-- The role decides the file, not the library: `AppConfig` is Pydantic and lives in
-  `config.py`.
-
-### Ids
-
-`app/records/ids.py` gives each kind of id a type of its own (`typing.NewType`), so
-mypy refuses one where another belongs:
-
-- **`DocumentId` and `VersionId`** are uuids. A guide's are the CMS's, always
-  version 7 (time-ordered), and refused otherwise: a path id that isn't one is
-  answered with 422. A source without ids of its own mints them (`minted_id`).
-- **`SectionId` and `ChunkId`** are `str`, hashed from what they identify unless
-  the source supplies its own.
-
 ## API endpoints
 
 | Endpoint                        | Description                    |
@@ -350,38 +257,20 @@ is always safe.
 
 ## The indexing queue's events
 
-The indexing queue carries guide events: [CloudEvents 1.0](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/spec.md)
-in structured JSON mode, so the whole event is the message body. They are the hub's
-events, not search's: `rpa-ai-guidance-hub-api` will publish them to its
-guide-events topic, and until it does, search's ingestion routes send the same
-events, so nothing in them assumes which service produced them. The contract is the AsyncAPI 3.0 document [`docs/asyncapi.json`](docs/asyncapi.json):
-the queue, its SQS binding, both messages with examples, and their payload
-schemas. It is generated from the event models in `app/ingestion/models.py`,
-which subclass the one CloudEvents base in `app/common/cloudevents.py`
-(`uv run task asyncapi`), and the pull-request workflow checks it is current and
-valid.
+The indexing queue carries guide events as [CloudEvents 1.0](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/spec.md)
+JSON. The contract is [`docs/asyncapi.json`](docs/asyncapi.json), generated from
+`app/ingestion/models.py` with `uv run task asyncapi`.
 
 | `type` | `data` |
 | --- | --- |
-| `uk.gov.defra.rpa.guidancehub.guide.version.published` | `documentId`, `versionId`, `sourceType`, `status`, `contentUrl`, `versionNumber`, `metadata` (the PUT body's keys) |
+| `uk.gov.defra.rpa.guidancehub.guide.version.published` | `documentId`, `versionId`, `sourceType`, `status`, `contentUrl`, `versionNumber`, `metadata` |
 | `uk.gov.defra.rpa.guidancehub.guide.version.deleted` | `documentId`, `versionId` |
 
-- `time` is when the version reached its status (the PUT body's `occurredAt`).
-- `subject` is `documents/{documentId}/versions/{versionId}`.
-- `source` names the producer, and is never checked: today always
-  `/rpa-ai-guidance-hub-search/ingestion`, later e.g. `/rpa-ai-guidance-hub-api/guides`.
-- `dataschema` is a producer-neutral URN naming the `data` schema and its major
-  version (`urn:defra:rpa-ai-guidance-hub:events:guide-version-published:v1`);
-  the AsyncAPI document gives each schema its URN as `$id`.
-- The `cdprequestid` extension carries the CDP trace id.
-
-Within v1, changes are additive and readers ignore what they don't know. A
-breaking change to `data` is a new schema and URN (`…:v2`), with the same `type`. An event of another type is acknowledged and ignored. An event of a
-known type that doesn't validate, or names a schema version the service doesn't
-read, is dead-lettered.
-
-If the topic's subscription doesn't use raw message delivery, the events arrive
-inside an SNS envelope; setting the consumer's `unwrap_sns=True` reads both forms.
+- `dataschema` names the version of `data`
+  (`urn:defra:rpa-ai-guidance-hub:events:guide-version-published:v1`). A breaking
+  change is a new version (`…:v2`); within a version, changes are additive.
+- An event of an unknown type is ignored. One that doesn't validate, or is in a
+  version the service doesn't read, is dead-lettered.
 
 ## Custom Cloudwatch Metrics
 

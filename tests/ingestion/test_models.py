@@ -32,8 +32,8 @@ class TestTheGoldenEvents:
     @pytest.mark.parametrize(
         ("path", "model"),
         [
-            pytest.param(PUBLISHED, ingestion_models.GuideVersionPublished, id="pub"),
-            pytest.param(DELETED, ingestion_models.GuideVersionDeleted, id="del"),
+            pytest.param(PUBLISHED, ingestion_models.GuideVersionPublishedV1, id="pub"),
+            pytest.param(DELETED, ingestion_models.GuideVersionDeletedV1, id="del"),
         ],
     )
     def test_parse_and_write_back_unchanged(self, path, model):
@@ -45,7 +45,10 @@ class TestTheGoldenEvents:
     def test_published_becomes_an_index_job_and_a_reader(self, mocker):
         event = ingestion_models.loads(PUBLISHED.read_text())
 
-        assert event.to_job() == jobs.IndexJob(
+        job = event.to_job()
+        reader = event.to_reader(mocker.sentinel.s3)
+
+        assert job == jobs.IndexJob(
             source_type=models.SourceType.GUIDE,
             document_id=guides.DOCUMENT_ID,
             version_id=guides.VERSION_ID,
@@ -53,7 +56,7 @@ class TestTheGoldenEvents:
             content_url=event.data.content_url,
             occurred_at=dt.datetime(2026, 11, 12, 10, tzinfo=dt.UTC),
         )
-        reader = event.to_reader(mocker.sentinel.s3)
+
         assert isinstance(reader, guide_source.GuideSource)
         assert isinstance(reader._content_source, guide_content.S3ContentSource)
         assert reader._title == "Field Visit Guide"
@@ -67,7 +70,9 @@ class TestTheGoldenEvents:
     def test_deleted_becomes_a_remove_job(self):
         event = ingestion_models.loads(DELETED.read_text())
 
-        assert event.to_job() == jobs.RemoveJob(
+        job = event.to_job()
+
+        assert job == jobs.RemoveJob(
             document_id=guides.DOCUMENT_ID,
             version_id=guides.VERSION_ID,
             occurred_at=dt.datetime(2026, 11, 13, 8, 30, tzinfo=dt.UTC),
@@ -76,7 +81,10 @@ class TestTheGoldenEvents:
 
 class TestRouting:
     def test_mints_a_new_id_per_event(self):
-        assert events.published().id != events.published().id
+        first = events.published()
+        second = events.published()
+
+        assert first.id != second.id
 
     def test_reads_an_unknown_type_as_unknown(self):
         body = _with(_golden(DELETED), type="uk.gov.defra.rpa.guidancehub.other")
@@ -114,14 +122,18 @@ class TestMessageAttributes:
     def test_copy_the_type_document_and_source_type(self):
         event = events.published()
 
-        assert ingestion_models.message_attributes(event) == {
-            "type": ingestion_models.GUIDE_VERSION_PUBLISHED,
+        attributes = ingestion_models.message_attributes(event)
+
+        assert attributes == {
+            "type": ingestion_models.GuideVersionPublishedV1.TYPE,
             "documentId": str(guides.DOCUMENT_ID),
             "sourceType": "guide",
         }
 
     def test_leave_out_the_source_type_of_a_deletion(self):
-        assert ingestion_models.message_attributes(events.deleted()) == {
-            "type": ingestion_models.GUIDE_VERSION_DELETED,
+        attributes = ingestion_models.message_attributes(events.deleted())
+
+        assert attributes == {
+            "type": ingestion_models.GuideVersionDeletedV1.TYPE,
             "documentId": str(guides.DOCUMENT_ID),
         }
