@@ -116,8 +116,8 @@ class IngestionMode(enum.StrEnum):
     """How documents reach the service.
 
     `http` mounts the ingestion routes, for the CMS to push to. `s3` leaves them
-    out, and documents arrive only through the `index-document` CLI, which works
-    in both modes.
+    out, and documents arrive only through the indexing queue and the
+    `index-document` CLI. The queue consumers run in both modes.
     """
 
     HTTP = "http"
@@ -149,7 +149,6 @@ class AppConfig(pydantic_settings.BaseSettings):
     http_proxy: pydantic.HttpUrl | None = None
     enable_metrics: bool = False
     ingestion_mode: IngestionMode = IngestionMode.HTTP
-    max_inline_content_bytes: int = pydantic.Field(default=2 * 1024 * 1024, gt=0)
     tracing_header: str = "x-cdp-request-id"
     claude_sonnet_model_config: Annotated[
         BedrockModelConfig, pydantic_settings.NoDecode

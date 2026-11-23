@@ -1,5 +1,4 @@
-"""Where a guide's `content.md` is read from: the API's managed-docs bucket,
-or the request that carried it inline.
+"""Where a guide's `content.md` is read from: the API's managed-docs bucket.
 
 The API writes each version's content at `<documentId>/<versionId>/content.md`.
 """
@@ -44,18 +43,3 @@ class S3ContentSource:
         body: bytes = response["Body"].read()
 
         return body.decode("utf-8")
-
-
-class InlineContent:
-    """One version's content, sent with the request.
-
-    Holds a single version, so it ignores `content_url`.
-    """
-
-    def __init__(self, markdown: str) -> None:
-        self._markdown = markdown
-
-    # Must match ContentSource.read, so the unused argument and the async are
-    # required rather than accidental.
-    async def read(self, content_url: str) -> str:  # noqa: ARG002  # NOSONAR
-        return self._markdown

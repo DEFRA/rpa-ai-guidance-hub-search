@@ -1,7 +1,8 @@
-"""Guide events for the fixture guide, as the indexing queue carries them."""
+"""Guide events and writer jobs for the fixture guide."""
 
 import datetime as dt
 
+from app.indexing import jobs
 from app.ingestion import models as ingestion_models
 from app.records import ids
 from tests.support import guides
@@ -43,3 +44,22 @@ def deleted(
     )
 
     return ingestion_models.guide_version_deleted(data, TIME, trace_id)
+
+
+def apply_job(chunk_set_key: str = "staged/s/d/v/published.jsonl") -> jobs.ApplyJob:
+    return jobs.ApplyJob(
+        document_id=guides.DOCUMENT_ID,
+        version_id=guides.VERSION_ID,
+        status=guides.job().status,
+        occurred_at=TIME,
+        strategy="packed-800-v2",
+        chunk_set_key=chunk_set_key,
+    )
+
+
+def remove_job() -> jobs.RemoveJob:
+    return jobs.RemoveJob(
+        document_id=guides.DOCUMENT_ID,
+        version_id=guides.VERSION_ID,
+        occurred_at=TIME,
+    )

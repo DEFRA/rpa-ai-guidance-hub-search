@@ -2,6 +2,7 @@
 """Write the AsyncAPI document of the service's queues to `docs/asyncapi.json` and `.yaml`, or check them."""
 
 import argparse
+import dataclasses
 import datetime as dt
 import json
 import pathlib
@@ -15,7 +16,10 @@ import yaml
 from pydantic import json_schema
 
 from app.common import cloudevents
+from app.indexing import jobs
+from app.indexing import models as indexing_models
 from app.ingestion import models as ingestion_models
+from app.records import ids, models
 
 ASYNCAPI_PATH = (
     pathlib.Path(__file__).resolve().parent.parent / "docs" / "asyncapi.json"
@@ -23,23 +27,97 @@ ASYNCAPI_PATH = (
 
 ASYNCAPI_VERSION = "3.0.0"
 DOCUMENT_VERSION = "1.0.0"
-"""The contract's version: the major version matches the schemas' `V1`."""
 
 SQS_BINDING_VERSION = "0.2.0"
-"""The newest SQS binding the AsyncAPI 3.0.0 schema accepts."""
 
-QUEUE = "rpa_ai_guidance_hub_search_indexing"
-DEAD_LETTER_QUEUE = f"{QUEUE}-deadletter"
 VISIBILITY_TIMEOUT_SECONDS = 60
 MAX_RECEIVE_COUNT = 3
 
 SCHEMAS = "#/components/schemas/{model}"
 
-EXAMPLE_DOCUMENT_ID = uuid.UUID("0199b8a2-0000-7000-8000-00000000f001")
-EXAMPLE_VERSION_ID = uuid.UUID("0199b8a2-0000-7000-8000-00000000f002")
+EXAMPLE_DOCUMENT_ID = ids.DocumentId(uuid.UUID("0199b8a2-0000-7000-8000-00000000f001"))
+EXAMPLE_VERSION_ID = ids.VersionId(uuid.UUID("0199b8a2-0000-7000-8000-00000000f002"))
 EXAMPLE_TIME = dt.datetime(2026, 11, 12, 10, tzinfo=dt.UTC)
 EXAMPLE_EVENT_ID = "0199c1d4-7a2e-7c3b-9f00-3b5a1e2d4c6f"
-"""Fixed, unlike a real event's, so the document is the same every time."""
+
+
+@dataclasses.dataclass(frozen=True)
+class Message:
+    name: str
+    title: str
+    model: type[cloudevents.KnownEvent]
+    example: cloudevents.KnownEvent
+
+
+@dataclasses.dataclass(frozen=True)
+class Channel:
+    key: str
+    queue: str
+    title: str
+    description: str
+    sent_by: str
+    received_by: str
+    messages: tuple[Message, ...]
+    fifo: bool = False
+
+    @property
+    def dead_letter_queue(self) -> str:
+        suffix = ".fifo" if self.fifo else ""
+        return f"{self.queue.removesuffix(suffix)}-deadletter{suffix}"
+
+
+def channels() -> tuple[Channel, ...]:
+    return (
+        Channel(
+            key="indexing",
+            queue="rpa_ai_guidance_hub_search_indexing",
+            title="Indexing queue",
+            description="Guide events from the hub. Unknown event types are ignored.",
+            sent_by="The ingestion routes, until the API publishes the events.",
+            received_by="The preparation worker.",
+            messages=(
+                Message(
+                    "guideVersionPublishedV1",
+                    "Guide version published",
+                    ingestion_models.GuideVersionPublishedV1,
+                    _published_example(),
+                ),
+                Message(
+                    "guideVersionDeletedV1",
+                    "Guide version deleted",
+                    ingestion_models.GuideVersionDeletedV1,
+                    _deleted_example(),
+                ),
+            ),
+        ),
+        Channel(
+            key="indexSync",
+            queue="rpa_ai_guidance_hub_search_index_sync.fifo",
+            title="Index sync queue",
+            description=(
+                "Work for the index's single writer, internal to search. One "
+                f"message group (`{indexing_models.GROUP_ID}`); deduplicated by "
+                "event `id`."
+            ),
+            sent_by="The preparation worker.",
+            received_by="The index writer.",
+            messages=(
+                Message(
+                    "guideVersionPreparedV1",
+                    "Guide version prepared",
+                    indexing_models.GuideVersionPreparedV1,
+                    _index_sync_example(_apply_job()),
+                ),
+                Message(
+                    "guideVersionRemovalRequestedV1",
+                    "Guide version removal requested",
+                    indexing_models.GuideVersionRemovalRequestedV1,
+                    _index_sync_example(_remove_job()),
+                ),
+            ),
+            fifo=True,
+        ),
+    )
 
 
 def render() -> str:
@@ -51,118 +129,113 @@ def render_yaml() -> str:
 
 
 def document() -> dict[str, Any]:
+    queues = channels()
+
     return {
         "asyncapi": ASYNCAPI_VERSION,
         "info": {
-            "title": "RPA AI Guidance Hub search: indexing events",
+            "title": "RPA AI Guidance Hub search: queues",
             "version": DOCUMENT_VERSION,
             "description": (
-                "Guide events the search service indexes. They are the hub's "
-                "events, not search's: rpa-ai-guidance-hub-api will publish them "
-                "to its guide-events topic, which delivers them to the indexing "
-                "queue, and until it does, search's own ingestion routes send the "
-                "same events. Each message is a CloudEvents 1.0 event in "
-                "structured JSON mode; `source` names whichever service sent it. "
-                "Within v1, changes are additive and readers ignore what they "
-                "don't know; a breaking change to `data` is a new schema, whose "
-                "URN `dataschema` names (`…:v2`)."
+                "The search service's queues. Messages are CloudEvents 1.0 in "
+                "structured JSON mode."
             ),
         },
         "defaultContentType": cloudevents.CONTENT_TYPE,
-        "channels": {
-            "indexing": {
-                "address": QUEUE,
-                "title": "Indexing queue",
-                "description": (
-                    "A standard SQS queue. A message that fails is received again "
-                    f"after {VISIBILITY_TIMEOUT_SECONDS} seconds, and dead-lettered "
-                    f"after {MAX_RECEIVE_COUNT} receives. An event of a type search "
-                    "doesn't read is acknowledged and ignored."
-                ),
-                "messages": {
-                    name: {"$ref": f"#/components/messages/{name}"}
-                    for name in _messages()
-                },
-                "bindings": {"sqs": _sqs_binding()},
-            },
-        },
+        "channels": {channel.key: _channel(channel) for channel in queues},
         "operations": {
-            "sendIndexingEvent": _operation(
-                "send",
-                "Search's ingestion routes send an event for each request, "
-                "until the API publishes them.",
-            ),
-            "receiveIndexingEvent": _operation(
-                "receive", "The preparation worker prepares or removes each version."
-            ),
+            name: operation
+            for channel in queues
+            for name, operation in _operations(channel).items()
         },
         "components": {
-            "messages": _messages(),
-            "schemas": _schemas(),
+            "messages": {
+                message.name: _message(message)
+                for channel in queues
+                for message in channel.messages
+            },
+            "schemas": _schemas(queues),
         },
     }
 
 
-def _operation(action: str, summary: str) -> dict[str, Any]:
+def _channel(channel: Channel) -> dict[str, Any]:
+    return {
+        "address": channel.queue,
+        "title": channel.title,
+        "description": (
+            f"{channel.description} Dead-lettered after {MAX_RECEIVE_COUNT} receives."
+        ),
+        "messages": {
+            message.name: {"$ref": f"#/components/messages/{message.name}"}
+            for message in channel.messages
+        },
+        "bindings": {"sqs": _sqs_binding(channel)},
+    }
+
+
+def _operations(channel: Channel) -> dict[str, Any]:
+    suffix = channel.key[0].upper() + channel.key[1:]
+
+    return {
+        f"send{suffix}Event": _operation(channel, "send", channel.sent_by),
+        f"receive{suffix}Event": _operation(channel, "receive", channel.received_by),
+    }
+
+
+def _operation(channel: Channel, action: str, summary: str) -> dict[str, Any]:
     return {
         "action": action,
         "summary": summary,
-        "channel": {"$ref": "#/channels/indexing"},
+        "channel": {"$ref": f"#/channels/{channel.key}"},
         "messages": [
-            {"$ref": f"#/channels/indexing/messages/{name}"} for name in _messages()
+            {"$ref": f"#/channels/{channel.key}/messages/{message.name}"}
+            for message in channel.messages
         ],
     }
 
 
-def _sqs_binding() -> dict[str, Any]:
+def _sqs_binding(channel: Channel) -> dict[str, Any]:
+    queue: dict[str, Any] = {
+        "name": channel.queue,
+        "fifoQueue": channel.fifo,
+        "visibilityTimeout": VISIBILITY_TIMEOUT_SECONDS,
+        "redrivePolicy": {
+            "deadLetterQueue": {"name": channel.dead_letter_queue},
+            "maxReceiveCount": MAX_RECEIVE_COUNT,
+        },
+    }
+
+    if channel.fifo:
+        queue |= {"deduplicationScope": "queue", "fifoThroughputLimit": "perQueue"}
+
     return {
         "bindingVersion": SQS_BINDING_VERSION,
-        "queue": {
-            "name": QUEUE,
-            "fifoQueue": False,
-            "visibilityTimeout": VISIBILITY_TIMEOUT_SECONDS,
-            "redrivePolicy": {
-                "deadLetterQueue": {"name": DEAD_LETTER_QUEUE},
-                "maxReceiveCount": MAX_RECEIVE_COUNT,
-            },
+        "queue": queue,
+        "deadLetterQueue": {
+            "name": channel.dead_letter_queue,
+            "fifoQueue": channel.fifo,
         },
-        "deadLetterQueue": {"name": DEAD_LETTER_QUEUE, "fifoQueue": False},
     }
 
 
-def _messages() -> dict[str, Any]:
+def _message(message: Message) -> dict[str, Any]:
     return {
-        "guideVersionPublishedV1": _message(
-            "Guide version published (v1)",
-            ingestion_models.GuideVersionPublishedV1,
-            _published_example(),
-        ),
-        "guideVersionDeletedV1": _message(
-            "Guide version deleted (v1)",
-            ingestion_models.GuideVersionDeletedV1,
-            _deleted_example(),
-        ),
-    }
-
-
-def _message(
-    title: str,
-    model: type[ingestion_models.GuideEvent],
-    example: ingestion_models.GuideEvent,
-) -> dict[str, Any]:
-    return {
-        "name": model.TYPE,
-        "title": title,
-        "summary": (model.__doc__ or "").strip(),
+        "name": message.model.TYPE,
+        "title": message.title,
+        "summary": (message.model.__doc__ or "").strip(),
         "contentType": cloudevents.CONTENT_TYPE,
-        "payload": {"$ref": SCHEMAS.format(model=model.__name__)},
+        "payload": {"$ref": SCHEMAS.format(model=message.model.__name__)},
         "examples": [
-            {"name": title, "payload": json.loads(cloudevents.dumps(example))},
+            {
+                "name": message.title,
+                "payload": json.loads(cloudevents.dumps(message.example)),
+            },
         ],
     }
 
 
-def _schemas() -> dict[str, Any]:
+def _schemas(queues: tuple[Channel, ...]) -> dict[str, Any]:
     """Each event's schema, and the schemas they refer to in `components.schemas`.
 
     A data schema has its URN as its `$id`, which makes it a resource of its own:
@@ -170,7 +243,7 @@ def _schemas() -> dict[str, Any]:
     parser resolves it against this document. So each is generated alone, with
     what it refers to inlined, leaving no reference for either to resolve.
     """
-    events = ingestion_models.KNOWN_EVENTS
+    events = [message.model for channel in queues for message in channel.messages]
 
     _, definitions = json_schema.models_json_schema(
         [(event, "validation") for event in events],
@@ -284,6 +357,32 @@ def _deleted_example() -> ingestion_models.GuideVersionDeletedV1:
     event = ingestion_models.guide_version_deleted(data, EXAMPLE_TIME)
 
     return event.model_copy(update={"id": EXAMPLE_EVENT_ID})
+
+
+def _apply_job() -> jobs.ApplyJob:
+    return jobs.ApplyJob(
+        document_id=EXAMPLE_DOCUMENT_ID,
+        version_id=EXAMPLE_VERSION_ID,
+        status=models.DocumentStatus.PUBLISHED,
+        occurred_at=EXAMPLE_TIME,
+        strategy="packed-800-v2",
+        chunk_set_key=(
+            f"staged/packed-800-v2/{EXAMPLE_DOCUMENT_ID}/{EXAMPLE_VERSION_ID}/"
+            "published.jsonl"
+        ),
+    )
+
+
+def _remove_job() -> jobs.RemoveJob:
+    return jobs.RemoveJob(
+        document_id=EXAMPLE_DOCUMENT_ID,
+        version_id=EXAMPLE_VERSION_ID,
+        occurred_at=EXAMPLE_TIME,
+    )
+
+
+def _index_sync_example(job: jobs.WriteJob) -> indexing_models.IndexSyncEvent:
+    return indexing_models.from_job(job, "rpa-ai-guidance-hub-search-store")
 
 
 def main(argv: list[str] | None = None) -> int:

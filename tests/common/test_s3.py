@@ -2,10 +2,12 @@ from unittest import mock
 from unittest.mock import MagicMock
 
 import boto3
+import pytest
+from botocore import exceptions as botocore_exceptions
 
 from app.common import s3
+from app.entrypoints import queue_consumers
 from app.index import builds
-from app.ingestion import service
 
 
 class TestGetS3Client:
@@ -82,6 +84,20 @@ class TestPoolSize:
         """Each document being prepared makes one call at a time; builds move
         `TRANSFER_CONCURRENCY` files at once. Past the pool, urllib3 throws
         connections away ("Connection pool is full")."""
-        most_at_once = service.PREPARE_CONCURRENCY + builds.TRANSFER_CONCURRENCY
+        most_at_once = queue_consumers.PREPARE_CONCURRENCY + builds.TRANSFER_CONCURRENCY
 
         assert most_at_once < s3.MAX_POOL_CONNECTIONS
+
+
+def _client_error(code):
+    return botocore_exceptions.ClientError({"Error": {"Code": code}}, "GetObject")
+
+
+class TestIsAccessDenied:
+    @pytest.mark.parametrize("code", ["AccessDenied", "403"])
+    def test_recognises_a_refusal(self, code):
+        assert s3.is_access_denied(_client_error(code))
+
+    @pytest.mark.parametrize("code", ["NoSuchKey", "SlowDown"])
+    def test_ignores_anything_else(self, code):
+        assert not s3.is_access_denied(_client_error(code))

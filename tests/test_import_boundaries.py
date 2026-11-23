@@ -14,7 +14,16 @@ ALLOWED = {APP / "index" / "tantivy_schema.py", APP / "index" / "tantivy_index.p
 # Within indexing, preparing (sources, sections, chunks) never touches the
 # index, and applying (staged chunks into the index) never prepares.
 FORBIDDEN = {
-    "indexing": {"app.search"},
+    "indexing": {"app.search", "app.ingestion"},
+    "ingestion": {"app.search"},
+    "common": {
+        "app.indexing",
+        "app.ingestion",
+        "app.search",
+        "app.index",
+        "app.records",
+        "app.matching",
+    },
     "indexing/prepare": {"app.index", "app.indexing.apply"},
     "indexing/apply": {"app.indexing.prepare"},
     "search": {"app.indexing"},
@@ -72,6 +81,22 @@ class TestTheTantivyImports:
 
     def test_check_finds_the_schema_module(self):
         assert "tantivy" in _imports(APP / "index" / "tantivy_schema.py")
+
+
+class TestTheQueueConsumerImports:
+    """Queues are entry points: only `app/entrypoints/` knows SQS messages."""
+
+    def test_are_only_in_the_entry_points(self):
+        offenders = [
+            str(path.relative_to(APP))
+            for path in APP.rglob("*.py")
+            if "entrypoints" not in path.relative_to(APP).parts
+            and "sqs_consumer" in _imports(path)
+        ]
+        assert offenders == []
+
+    def test_check_finds_the_consumers_module(self):
+        assert "sqs_consumer" in _imports(APP / "entrypoints" / "queue_consumers.py")
 
 
 class TestTheDomainImports:

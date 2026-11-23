@@ -9,14 +9,16 @@ import fastapi
 import uvicorn
 
 from app import config as app_config
-from app.common import mongo, s3, tracing
+from app.common import mongo, s3, sqs, tracing
+from app.entrypoints import queue_consumers
 from app.health import router as health_router
 from app.index import active_index, builds
 from app.ingestion import router as ingestion_router
-from app.ingestion import service as ingestion_service
 from app.search.v1 import router as search_v1_router
 
 logger = getLogger(__name__)
+
+GRACEFUL_SHUTDOWN_MARGIN_SECONDS = 5
 
 
 @asynccontextmanager
@@ -26,9 +28,9 @@ async def lifespan(_: fastapi.FastAPI) -> AsyncGenerator[None]:
     logger.info("MongoDB client connected")
 
     database = await mongo.get_db(client, config)
-    index_builds = builds.get_index_build_service(
-        database, config, s3.get_s3_client(config)
-    )
+    s3_client = s3.get_s3_client(config)
+    sqs_client = sqs.get_sqs_client(config)
+    index_builds = builds.get_index_build_service(database, config, s3_client)
 
     await active_index.load(config.search_index_directory, index_builds)
 
@@ -41,7 +43,8 @@ async def lifespan(_: fastapi.FastAPI) -> AsyncGenerator[None]:
     )
 
     try:
-        yield
+        async with queue_consumers.indexing_queue(config, sqs_client, s3_client):
+            yield
     finally:
         polling.cancel()
 
@@ -59,6 +62,8 @@ def create_app(
 ) -> fastapi.FastAPI:
     """Build the app, mounting the ingestion routes only in `http` mode.
 
+    The queue consumers run from the lifespan, in either mode.
+
     A factory rather than a module-level app, so importing this module never
     builds `AppConfig`. Without a `config` it reads the environment's; without
     an explicit mode it uses the config's `INGESTION_MODE`.
@@ -75,9 +80,6 @@ def create_app(
     app.include_router(search_v1_router.router)
 
     if ingestion_mode is app_config.IngestionMode.HTTP:
-        # One per app, so every request's ingestion service shares it
-        # (`ingestion.service.get_state`).
-        app.state.ingestion = ingestion_service.IngestionState()
         app.include_router(ingestion_router.router)
 
     return app
@@ -100,6 +102,8 @@ def main() -> None:  # pragma: no cover
         port=config.port,
         log_config=config.log_config,
         reload=config.python_env == "development",
+        timeout_graceful_shutdown=config.sqs_shutdown_timeout_seconds
+        + GRACEFUL_SHUTDOWN_MARGIN_SECONDS,
     )
 
 

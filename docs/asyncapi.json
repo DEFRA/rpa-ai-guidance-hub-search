@@ -1,6 +1,41 @@
 {
   "asyncapi": "3.0.0",
   "channels": {
+    "indexSync": {
+      "address": "rpa_ai_guidance_hub_search_index_sync.fifo",
+      "bindings": {
+        "sqs": {
+          "bindingVersion": "0.2.0",
+          "deadLetterQueue": {
+            "fifoQueue": true,
+            "name": "rpa_ai_guidance_hub_search_index_sync-deadletter.fifo"
+          },
+          "queue": {
+            "deduplicationScope": "queue",
+            "fifoQueue": true,
+            "fifoThroughputLimit": "perQueue",
+            "name": "rpa_ai_guidance_hub_search_index_sync.fifo",
+            "redrivePolicy": {
+              "deadLetterQueue": {
+                "name": "rpa_ai_guidance_hub_search_index_sync-deadletter.fifo"
+              },
+              "maxReceiveCount": 3
+            },
+            "visibilityTimeout": 60
+          }
+        }
+      },
+      "description": "Work for the index's single writer, internal to search. One message group (`index-writer`); deduplicated by event `id`. Dead-lettered after 3 receives.",
+      "messages": {
+        "guideVersionPreparedV1": {
+          "$ref": "#/components/messages/guideVersionPreparedV1"
+        },
+        "guideVersionRemovalRequestedV1": {
+          "$ref": "#/components/messages/guideVersionRemovalRequestedV1"
+        }
+      },
+      "title": "Index sync queue"
+    },
     "indexing": {
       "address": "rpa_ai_guidance_hub_search_indexing",
       "bindings": {
@@ -23,7 +58,7 @@
           }
         }
       },
-      "description": "A standard SQS queue. A message that fails is received again after 60 seconds, and dead-lettered after 3 receives. An event of a type search doesn't read is acknowledged and ignored.",
+      "description": "Guide events from the hub. Unknown event types are ignored. Dead-lettered after 3 receives.",
       "messages": {
         "guideVersionDeletedV1": {
           "$ref": "#/components/messages/guideVersionDeletedV1"
@@ -41,7 +76,7 @@
         "contentType": "application/cloudevents+json",
         "examples": [
           {
-            "name": "Guide version deleted (v1)",
+            "name": "Guide version deleted",
             "payload": {
               "data": {
                 "documentId": "0199b8a2-0000-7000-8000-00000000f001",
@@ -63,13 +98,47 @@
           "$ref": "#/components/schemas/GuideVersionDeletedV1"
         },
         "summary": "A version of a guide was deleted, at every status.",
-        "title": "Guide version deleted (v1)"
+        "title": "Guide version deleted"
+      },
+      "guideVersionPreparedV1": {
+        "contentType": "application/cloudevents+json",
+        "examples": [
+          {
+            "name": "Guide version prepared",
+            "payload": {
+              "data": {
+                "chunkSet": {
+                  "bucket": "rpa-ai-guidance-hub-search-store",
+                  "key": "staged/packed-800-v2/0199b8a2-0000-7000-8000-00000000f001/0199b8a2-0000-7000-8000-00000000f002/published.jsonl"
+                },
+                "documentId": "0199b8a2-0000-7000-8000-00000000f001",
+                "status": "published",
+                "strategy": "packed-800-v2",
+                "versionId": "0199b8a2-0000-7000-8000-00000000f002"
+              },
+              "datacontenttype": "application/json",
+              "dataschema": "urn:defra:rpa-ai-guidance-hub-search:events:guide-version-prepared:v1",
+              "id": "d9da2d50-0343-5875-a996-60f0a46dbbf1",
+              "source": "/rpa-ai-guidance-hub-search/preparation",
+              "specversion": "1.0",
+              "subject": "documents/0199b8a2-0000-7000-8000-00000000f001/versions/0199b8a2-0000-7000-8000-00000000f002",
+              "time": "2026-11-12T10:00:00Z",
+              "type": "uk.gov.defra.rpa.guidancehub.search.guide.version.prepared"
+            }
+          }
+        ],
+        "name": "uk.gov.defra.rpa.guidancehub.search.guide.version.prepared",
+        "payload": {
+          "$ref": "#/components/schemas/GuideVersionPreparedV1"
+        },
+        "summary": "A version's chunks are staged, ready for the writer to apply.",
+        "title": "Guide version prepared"
       },
       "guideVersionPublishedV1": {
         "contentType": "application/cloudevents+json",
         "examples": [
           {
-            "name": "Guide version published (v1)",
+            "name": "Guide version published",
             "payload": {
               "data": {
                 "contentUrl": "s3://rpa-ai-guidance-hub-managed-docs/0199b8a2-0000-7000-8000-00000000f001/0199b8a2-0000-7000-8000-00000000f002/content.md",
@@ -102,7 +171,35 @@
           "$ref": "#/components/schemas/GuideVersionPublishedV1"
         },
         "summary": "A version of a guide was published, so it should be what search finds.",
-        "title": "Guide version published (v1)"
+        "title": "Guide version published"
+      },
+      "guideVersionRemovalRequestedV1": {
+        "contentType": "application/cloudevents+json",
+        "examples": [
+          {
+            "name": "Guide version removal requested",
+            "payload": {
+              "data": {
+                "documentId": "0199b8a2-0000-7000-8000-00000000f001",
+                "versionId": "0199b8a2-0000-7000-8000-00000000f002"
+              },
+              "datacontenttype": "application/json",
+              "dataschema": "urn:defra:rpa-ai-guidance-hub-search:events:guide-version-removal-requested:v1",
+              "id": "1ea73cb6-c62e-5f70-bd8e-fc666603b145",
+              "source": "/rpa-ai-guidance-hub-search/preparation",
+              "specversion": "1.0",
+              "subject": "documents/0199b8a2-0000-7000-8000-00000000f001/versions/0199b8a2-0000-7000-8000-00000000f002",
+              "time": "2026-11-12T10:00:00Z",
+              "type": "uk.gov.defra.rpa.guidancehub.search.guide.version.removal-requested"
+            }
+          }
+        ],
+        "name": "uk.gov.defra.rpa.guidancehub.search.guide.version.removal-requested",
+        "payload": {
+          "$ref": "#/components/schemas/GuideVersionRemovalRequestedV1"
+        },
+        "summary": "A version is to be taken out of the index, and its staged files deleted.",
+        "title": "Guide version removal requested"
       }
     },
     "schemas": {
@@ -206,6 +303,142 @@
           "data"
         ],
         "title": "GuideVersionDeletedV1",
+        "type": "object"
+      },
+      "GuideVersionPreparedDataV1": {
+        "$id": "urn:defra:rpa-ai-guidance-hub-search:events:guide-version-prepared:v1",
+        "properties": {
+          "chunkSet": {
+            "properties": {
+              "bucket": {
+                "minLength": 1,
+                "title": "Bucket",
+                "type": "string"
+              },
+              "key": {
+                "minLength": 1,
+                "title": "Key",
+                "type": "string"
+              }
+            },
+            "required": [
+              "bucket",
+              "key"
+            ],
+            "title": "ChunkSetRef",
+            "type": "object"
+          },
+          "documentId": {
+            "format": "uuid",
+            "title": "Documentid",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "ready_for_publish",
+              "published"
+            ],
+            "title": "DocumentStatus",
+            "type": "string"
+          },
+          "strategy": {
+            "minLength": 1,
+            "title": "Strategy",
+            "type": "string"
+          },
+          "versionId": {
+            "format": "uuid",
+            "title": "Versionid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documentId",
+          "versionId",
+          "status",
+          "strategy",
+          "chunkSet"
+        ],
+        "title": "GuideVersionPreparedDataV1",
+        "type": "object"
+      },
+      "GuideVersionPreparedV1": {
+        "description": "A version's chunks are staged, ready for the writer to apply.",
+        "properties": {
+          "cdprequestid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cdprequestid"
+          },
+          "data": {
+            "$ref": "#/components/schemas/GuideVersionPreparedDataV1"
+          },
+          "datacontenttype": {
+            "const": "application/json",
+            "default": "application/json",
+            "title": "Datacontenttype",
+            "type": "string"
+          },
+          "dataschema": {
+            "const": "urn:defra:rpa-ai-guidance-hub-search:events:guide-version-prepared:v1",
+            "title": "Dataschema",
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "source": {
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "specversion": {
+            "const": "1.0",
+            "title": "Specversion",
+            "type": "string"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subject"
+          },
+          "time": {
+            "format": "date-time",
+            "title": "Time",
+            "type": "string"
+          },
+          "type": {
+            "const": "uk.gov.defra.rpa.guidancehub.search.guide.version.prepared",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "specversion",
+          "id",
+          "source",
+          "type",
+          "time",
+          "dataschema",
+          "data"
+        ],
+        "title": "GuideVersionPreparedV1",
         "type": "object"
       },
       "GuideVersionPublishedDataV1": {
@@ -446,16 +679,131 @@
         ],
         "title": "GuideVersionPublishedV1",
         "type": "object"
+      },
+      "GuideVersionRemovalRequestedDataV1": {
+        "$id": "urn:defra:rpa-ai-guidance-hub-search:events:guide-version-removal-requested:v1",
+        "properties": {
+          "documentId": {
+            "format": "uuid",
+            "title": "Documentid",
+            "type": "string"
+          },
+          "versionId": {
+            "format": "uuid",
+            "title": "Versionid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documentId",
+          "versionId"
+        ],
+        "title": "GuideVersionRemovalRequestedDataV1",
+        "type": "object"
+      },
+      "GuideVersionRemovalRequestedV1": {
+        "description": "A version is to be taken out of the index, and its staged files deleted.",
+        "properties": {
+          "cdprequestid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cdprequestid"
+          },
+          "data": {
+            "$ref": "#/components/schemas/GuideVersionRemovalRequestedDataV1"
+          },
+          "datacontenttype": {
+            "const": "application/json",
+            "default": "application/json",
+            "title": "Datacontenttype",
+            "type": "string"
+          },
+          "dataschema": {
+            "const": "urn:defra:rpa-ai-guidance-hub-search:events:guide-version-removal-requested:v1",
+            "title": "Dataschema",
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "source": {
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "specversion": {
+            "const": "1.0",
+            "title": "Specversion",
+            "type": "string"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Subject"
+          },
+          "time": {
+            "format": "date-time",
+            "title": "Time",
+            "type": "string"
+          },
+          "type": {
+            "const": "uk.gov.defra.rpa.guidancehub.search.guide.version.removal-requested",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "specversion",
+          "id",
+          "source",
+          "type",
+          "time",
+          "dataschema",
+          "data"
+        ],
+        "title": "GuideVersionRemovalRequestedV1",
+        "type": "object"
       }
     }
   },
   "defaultContentType": "application/cloudevents+json",
   "info": {
-    "description": "Guide events the search service indexes. They are the hub's events, not search's: rpa-ai-guidance-hub-api will publish them to its guide-events topic, which delivers them to the indexing queue, and until it does, search's own ingestion routes send the same events. Each message is a CloudEvents 1.0 event in structured JSON mode; `source` names whichever service sent it. Within v1, changes are additive and readers ignore what they don't know; a breaking change to `data` is a new schema, whose URN `dataschema` names (`\u2026:v2`).",
-    "title": "RPA AI Guidance Hub search: indexing events",
+    "description": "The search service's queues. Messages are CloudEvents 1.0 in structured JSON mode.",
+    "title": "RPA AI Guidance Hub search: queues",
     "version": "1.0.0"
   },
   "operations": {
+    "receiveIndexSyncEvent": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/indexSync"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/indexSync/messages/guideVersionPreparedV1"
+        },
+        {
+          "$ref": "#/channels/indexSync/messages/guideVersionRemovalRequestedV1"
+        }
+      ],
+      "summary": "The index writer."
+    },
     "receiveIndexingEvent": {
       "action": "receive",
       "channel": {
@@ -469,7 +817,22 @@
           "$ref": "#/channels/indexing/messages/guideVersionDeletedV1"
         }
       ],
-      "summary": "The preparation worker prepares or removes each version."
+      "summary": "The preparation worker."
+    },
+    "sendIndexSyncEvent": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/indexSync"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/indexSync/messages/guideVersionPreparedV1"
+        },
+        {
+          "$ref": "#/channels/indexSync/messages/guideVersionRemovalRequestedV1"
+        }
+      ],
+      "summary": "The preparation worker."
     },
     "sendIndexingEvent": {
       "action": "send",
@@ -484,7 +847,7 @@
           "$ref": "#/channels/indexing/messages/guideVersionDeletedV1"
         }
       ],
-      "summary": "Search's ingestion routes send an event for each request, until the API publishes them."
+      "summary": "The ingestion routes, until the API publishes the events."
     }
   }
 }

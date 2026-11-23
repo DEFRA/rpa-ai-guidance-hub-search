@@ -7,11 +7,24 @@ import jsonschema
 import pydantic
 import pytest
 
+from app.indexing import models as indexing_models
 from app.ingestion import models as ingestion_models
 from scripts import export_asyncapi
 from tests.support import events
 
-MESSAGES = ["guideVersionPublishedV1", "guideVersionDeletedV1"]
+CHANNELS = {
+    "indexing": (
+        ingestion_models.loads,
+        ["guideVersionPublishedV1", "guideVersionDeletedV1"],
+    ),
+    "indexSync": (
+        indexing_models.loads,
+        ["guideVersionPreparedV1", "guideVersionRemovalRequestedV1"],
+    ),
+}
+MESSAGES = [
+    (channel, name) for channel, (_, names) in CHANNELS.items() for name in names
+]
 
 EVENTS_AND_DATA = [
     (
@@ -158,24 +171,35 @@ class TestMessages:
             message["name"] for message in document["components"]["messages"].values()
         }
 
-        assert names == {event.TYPE for event in ingestion_models.KNOWN_EVENTS}
+        assert names == {
+            event.TYPE
+            for event in (*ingestion_models.KNOWN_EVENTS, *indexing_models.KNOWN_EVENTS)
+        }
 
-    @pytest.mark.parametrize("name", MESSAGES)
-    def test_each_is_a_cloudevent_with_a_valid_example(self, document, name):
+    @pytest.mark.parametrize(("channel", "name"), MESSAGES)
+    def test_each_is_a_cloudevent_with_a_valid_example(self, document, channel, name):
         message = document["components"]["messages"][name]
+        loads, _ = CHANNELS[channel]
 
         (example,) = message["examples"]
-        event = ingestion_models.loads(json.dumps(example["payload"]))
+        event = loads(json.dumps(example["payload"]))
 
         assert message["contentType"] == "application/cloudevents+json"
         assert message["name"] == event.type
 
 
 class TestOperations:
+    @pytest.mark.parametrize("channel", CHANNELS)
     @pytest.mark.parametrize("action", ["send", "receive"])
-    def test_send_and_receive_every_message(self, document, action):
+    def test_send_and_receive_every_message_of_each_queue(
+        self, document, channel, action
+    ):
         (operation,) = [
-            op for op in document["operations"].values() if op["action"] == action
+            op
+            for op in document["operations"].values()
+            if op["action"] == action
+            and op["channel"]["$ref"] == f"#/channels/{channel}"
         ]
+        _, names = CHANNELS[channel]
 
-        assert len(operation["messages"]) == len(MESSAGES)
+        assert len(operation["messages"]) == len(names)

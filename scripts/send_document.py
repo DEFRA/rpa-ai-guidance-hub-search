@@ -4,19 +4,16 @@
 For local development; the service must run in `http` ingestion mode.
 
     uv run task send-document --document-id G --version-id V --title "Title" \
-        --content-url s3://<bucket>/<G>/<V>/content.md
-
-    uv run task send-document --document-id G --version-id V --title "Title" \
-        --content-file guide.md [--version-number 1.2]
+        --content-url s3://<bucket>/<G>/<V>/content.md [--version-number 1.2]
 
     uv run task send-document --document-id G --version-id V --delete
 
-The service replies `202`; check its log for the outcome.
+The service replies `202` once the request is queued; check its log for the
+outcome. The content must already be in the managed-docs bucket.
 """
 
 import argparse
 import datetime as dt
-import pathlib
 import sys
 import uuid
 from collections.abc import Sequence
@@ -51,13 +48,9 @@ def _body(args: argparse.Namespace) -> dict[str, Any]:
         "status": models.DocumentStatus.PUBLISHED.value,
         "occurredAt": dt.datetime.now(dt.UTC).isoformat(),
         "versionNumber": args.version_number,
+        "contentUrl": args.content_url,
         "metadata": {"guideTitle": args.title},
     }
-
-    if args.content_url:
-        body["contentUrl"] = args.content_url
-    else:
-        body["content"] = {"markdown": args.content_file.read_text()}
 
     return body
 
@@ -77,7 +70,6 @@ def _parser() -> argparse.ArgumentParser:
 
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--content-url")
-    action.add_argument("--content-file", type=pathlib.Path)
     action.add_argument("--delete", action="store_true")
 
     return parser

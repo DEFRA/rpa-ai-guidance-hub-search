@@ -1,4 +1,4 @@
-"""Content read from the managed-docs bucket, or sent inline."""
+"""Content read from the managed-docs bucket."""
 
 import pytest
 
@@ -49,10 +49,3 @@ class TestS3ContentSource:
 
         with pytest.raises(bucket.exceptions.NoSuchKey):
             await source.read(missing)
-
-
-class TestInlineContent:
-    async def test_hands_back_what_it_was_sent(self):
-        source = guide_content.InlineContent("# Title\n")
-
-        assert await source.read(URL) == "# Title\n"
