@@ -24,10 +24,10 @@ class Reports:
         self.errors: list[Exception] = []
         self.denied: list[Exception] = []
 
-    async def report(self, exc: Exception) -> None:
+    def report(self, exc: Exception) -> None:
         self.errors.append(exc)
 
-    async def deny(self, exc: Exception) -> None:
+    def deny(self, exc: Exception) -> None:
         self.denied.append(exc)
 
 

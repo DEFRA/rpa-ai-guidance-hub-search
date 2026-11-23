@@ -37,7 +37,8 @@ class ConsumerOptions[T](TypedDict, total=False):
     """Keyword options shared by Consumer and BatchConsumer. Defaults: _Settings."""
 
     deserializer: Callable[[str], T]
-    client: "sqs_client.SQSClient | None"  # noqa: UP037 - a dev-only stub, read by get_type_hints
+    # Quoted: sqs_client is a dev-only stub, and get_type_hints reads this.
+    client: "sqs_client.SQSClient | None"  # noqa: UP037
     receive: config.Receive
     handler_timeout: float | None
     shutdown_timeout: float | None
@@ -57,7 +58,8 @@ class _Settings[T]:
     """ConsumerOptions with their defaults, checked once at construction."""
 
     deserializer: Callable[[str], T] = json.loads
-    client: "sqs_client.SQSClient | None" = None  # noqa: UP037 - a dev-only stub, read by get_type_hints
+    # Quoted: sqs_client is a dev-only stub, and get_type_hints reads this.
+    client: "sqs_client.SQSClient | None" = None  # noqa: UP037
     receive: config.Receive = dataclasses.field(default_factory=config.Receive)
     handler_timeout: float | None = None
     shutdown_timeout: float | None = None
@@ -221,14 +223,14 @@ class _BaseConsumer[T](abc.ABC):
         active.task.add_done_callback(self._log_crash)
         self._active = active
 
-    async def stop(self, timeout: float | None = None) -> None:
-        """Stop polling and let in-flight work finish, for up to `timeout` seconds.
+    async def stop(self, shutdown_timeout: float | None = None) -> None:
+        """Stop polling and give in-flight work `shutdown_timeout` seconds to finish.
 
         On timeout the handlers are cancelled and nothing in the batch is deleted.
 
         Args:
-            timeout: Seconds to wait; defaults to shutdown_timeout, and None
-                there waits for as long as it takes.
+            shutdown_timeout: Seconds to wait; defaults to the shutdown_timeout
+                option, and None there waits for as long as it takes.
 
         Raises:
             Whatever crashed the polling task, if it crashed.
@@ -237,12 +239,12 @@ class _BaseConsumer[T](abc.ABC):
         if active is None:
             return
 
-        if timeout is None:
-            timeout = self._settings.shutdown_timeout
+        if shutdown_timeout is None:
+            shutdown_timeout = self._settings.shutdown_timeout
 
         task = active.task
         active.stop_event.set()
-        done, _ = await asyncio.wait({task}, timeout=timeout)
+        done, _ = await asyncio.wait({task}, timeout=shutdown_timeout)
         graceful = bool(done)
         if not graceful:
             task.cancel()
@@ -339,7 +341,7 @@ class _BaseConsumer[T](abc.ABC):
                     ]
                 except Exception as exc:
                     failures += 1
-                    await self._report(exc)
+                    self._report(exc)
                     await self._back_off(active, failures)
                     continue
 
@@ -354,7 +356,7 @@ class _BaseConsumer[T](abc.ABC):
                 except Exception as exc:
                     # A bug here must not stop the consumer; the batch is simply
                     # not acknowledged and SQS redelivers it.
-                    await self._report(exc)
+                    self._report(exc)
         finally:
             await self._emit(settings.hooks.on_stopped)
 
@@ -431,11 +433,11 @@ class _BaseConsumer[T](abc.ABC):
                     DELETE, "delete_on_success", "set delete_on_success=False"
                 )
                 denied.__cause__ = exc
-                await self._report(denied)
+                self._report(denied)
             else:
-                await self._report(exc)
+                self._report(exc)
         except (errors.PartialFailureError, botocore.exceptions.BotoCoreError) as exc:
-            await self._report(exc)
+            self._report(exc)
 
     def _releases(
         self,
@@ -492,21 +494,21 @@ class _BaseConsumer[T](abc.ABC):
                     CHANGE_VISIBILITY, feature, remedy
                 )
                 denied.__cause__ = exc
-                await self._report(denied)
+                self._report(denied)
             else:
-                await self._report(exc)
+                self._report(exc)
         except (errors.PartialFailureError, botocore.exceptions.BotoCoreError) as exc:
-            await self._report(exc)
+            self._report(exc)
 
-    async def _heartbeat_denied(self, active: _Run, exc: Exception) -> None:
+    def _heartbeat_denied(self, active: _Run, exc: Exception) -> None:
         active.heartbeat_enabled = False
         denied = errors.MissingPermissionError(
             CHANGE_VISIBILITY, "heartbeat", "set heartbeat=None"
         )
         denied.__cause__ = exc
-        await self._report(denied)
+        self._report(denied)
 
-    async def _report(self, exc: Exception) -> None:
+    def _report(self, exc: Exception) -> None:
         self._settings.logger.warning("sqs consumer error: %s", exc, exc_info=exc)
 
     async def _emit(
@@ -574,17 +576,9 @@ class Consumer[T](_BaseConsumer[T]):
         skipped: dict[str, list[message.Message[T]]] = {}
 
         async def one(item: message.Message[T]) -> bool:
-            try:
-                async with asyncio.timeout(self._settings.handler_timeout) as scope:
-                    await handler(item)
-            except Exception as exc:
-                outcomes[item.receipt_handle] = (
-                    self._timeout_error() if scope.expired() else exc
-                )
-                return False
-
-            outcomes[item.receipt_handle] = None
-            return True
+            outcome = await self._run(handler, item)
+            outcomes[item.receipt_handle] = outcome
+            return outcome is None
 
         async def in_order(group: list[message.Message[T]]) -> None:
             for i, item in enumerate(group):
@@ -601,6 +595,18 @@ class Consumer[T](_BaseConsumer[T]):
                     tasks.create_task(one(item))
 
         return _sorted(messages, outcomes, skipped)
+
+    async def _run(
+        self, handler: Handler[T], item: message.Message[T]
+    ) -> Exception | None:
+        """Call `handler` on one message, returning what it raised, if anything."""
+        try:
+            async with asyncio.timeout(self._settings.handler_timeout) as scope:
+                await handler(item)
+        except Exception as exc:
+            return self._timeout_error() if scope.expired() else exc
+
+        return None
 
 
 def _sorted[T](

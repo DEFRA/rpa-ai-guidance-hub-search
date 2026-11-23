@@ -46,7 +46,8 @@ class Gateway:
 
     def __init__(
         self,
-        client: "sqs_client.SQSClient",  # noqa: UP037 - a dev-only stub
+        # Quoted: sqs_client is a dev-only stub.
+        client: "sqs_client.SQSClient",  # noqa: UP037
         queue_url: str,
         pool: concurrent.futures.ThreadPoolExecutor,
     ) -> None:
@@ -141,10 +142,10 @@ class Gateway:
             raise errors.PartialFailureError(msg, failed)
 
     async def change_visibility(
-        self, messages: Sequence[message.Message[Any]], timeout: int
+        self, messages: Sequence[message.Message[Any]], visibility_timeout: int
     ) -> None:
         """Give every message the same timeout; see change_visibility_each."""
-        await self.change_visibility_each([(m, timeout) for m in messages])
+        await self.change_visibility_each([(m, visibility_timeout) for m in messages])
 
     async def change_visibility_each(
         self, entries: Sequence[tuple[message.Message[Any], int]]

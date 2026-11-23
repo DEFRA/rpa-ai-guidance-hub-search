@@ -1,7 +1,7 @@
 """Keep a batch invisible while its handlers run."""
 
 import asyncio
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import botocore.exceptions
@@ -14,8 +14,8 @@ async def run(
     messages: Sequence[message.Message[Any]],
     heartbeat: config.Heartbeat,
     *,
-    report: Callable[[Exception], Awaitable[None]],
-    denied: Callable[[Exception], Awaitable[None]],
+    report: Callable[[Exception], None],
+    denied: Callable[[Exception], None],
 ) -> None:
     """Extend visibility every heartbeat.interval until cancelled.
 
@@ -29,9 +29,9 @@ async def run(
             await queue.change_visibility(messages, heartbeat.visibility_timeout)
         except botocore.exceptions.ClientError as exc:
             if gateway.is_access_denied(exc):
-                await denied(exc)
+                denied(exc)
                 return
 
-            await report(exc)
+            report(exc)
         except Exception as exc:
-            await report(exc)
+            report(exc)

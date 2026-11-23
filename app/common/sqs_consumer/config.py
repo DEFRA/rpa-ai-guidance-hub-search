@@ -132,4 +132,5 @@ class Backoff:
             The delay in seconds, randomised if jitter is on.
         """
         ceiling = min(self.maximum, self.initial * self.factor ** (failures - 1))
-        return random.uniform(0, ceiling) if self.jitter else ceiling  # noqa: S311 - jitter, not security
+        # Jitter, not security, so the non-cryptographic generator is fine.
+        return random.uniform(0, ceiling) if self.jitter else ceiling  # noqa: S311

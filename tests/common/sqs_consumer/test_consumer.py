@@ -605,7 +605,7 @@ class TestLifecycle:
         await subject.start()
         await started.wait()
 
-        await subject.stop(timeout=0.2)
+        await subject.stop(shutdown_timeout=0.2)
 
         assert cancelled.is_set()
         assert not subject.is_running
@@ -622,7 +622,7 @@ class TestLifecycle:
         )
         await subject.start()
         await asyncio.sleep(0.3)
-        await subject.stop(timeout=0.1)
+        await subject.stop(shutdown_timeout=0.1)
 
         consumers.send(client, queue_url, "late")
 
@@ -638,7 +638,7 @@ class TestLifecycle:
         )
         await subject.start()
         await asyncio.sleep(0.3)
-        await subject.stop(timeout=0.1)
+        await subject.stop(shutdown_timeout=0.1)
 
         consumers.send(client, queue_url, "late")
 
