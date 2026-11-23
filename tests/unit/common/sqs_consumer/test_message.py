@@ -3,7 +3,7 @@ import json
 import pytest
 
 from app.common.sqs_consumer import errors, message
-from tests.common.sqs_consumer.fixtures import sns_envelopes, sqs_messages
+from tests.unit.common.sqs_consumer.fixtures import sns_envelopes, sqs_messages
 
 
 class TestFromSqs:

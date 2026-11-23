@@ -378,27 +378,7 @@ class _BaseConsumer[T](abc.ABC):
         for received in messages:
             await self._emit(settings.hooks.on_message_received, received)
 
-        beat: asyncio.Task[None] | None = None
-
-        if settings.heartbeat is not None and active.heartbeat_enabled:
-            beat = asyncio.create_task(
-                heartbeat.run(
-                    active.queue,
-                    messages,
-                    settings.heartbeat,
-                    report=self._report,
-                    denied=functools.partial(self._heartbeat_denied, active),
-                )
-            )
-
-        try:
-            outcome = await self._handle(messages)
-        finally:
-            if beat is not None:
-                beat.cancel()
-                await asyncio.wait({beat})
-
-        acked, failures = outcome
+        acked, failures = await self._handle_with_heartbeat(active, messages)
         if settings.delete_on_success and acked:
             await self._delete(active, acked)
 
@@ -424,6 +404,42 @@ class _BaseConsumer[T](abc.ABC):
                 )
 
             await self._emit(settings.hooks.on_processing_error, exc, group)
+
+    async def _handle_with_heartbeat(
+        self, active: _Run, messages: list[message.Message[T]]
+    ) -> _Outcome[T]:
+        """Run the handlers, extending visibility meanwhile if heartbeat is on.
+
+        On return no heartbeat request is in flight, so none can overwrite the
+        visibility the caller sets next. If the handlers are cancelled (a forced
+        shutdown) nothing will be deleted or released, so an in-flight request is
+        abandoned rather than waited for.
+        """
+        settings = self._settings
+
+        if settings.heartbeat is None or not active.heartbeat_enabled:
+            return await self._handle(messages)
+
+        finished = asyncio.Event()
+        beat = asyncio.create_task(
+            heartbeat.run(
+                active.queue,
+                messages,
+                settings.heartbeat,
+                finished=finished,
+                report=self._report,
+                denied=functools.partial(self._heartbeat_denied, active),
+            )
+        )
+
+        try:
+            return await self._handle(messages)
+        except BaseException:
+            beat.cancel()
+            raise
+        finally:
+            finished.set()
+            await asyncio.wait({beat})
 
     def _timeout_error(self) -> errors.HandlerTimeoutError:
         return errors.HandlerTimeoutError(

@@ -5,8 +5,8 @@ import pytest
 from types_boto3_sqs import client as sqs_client
 
 from app.common.sqs_consumer import config, errors, message
-from tests.common.sqs_consumer.support import consumers, iam, sqs
-from tests.common.sqs_consumer.support import events as hook_events
+from tests.unit.common.sqs_consumer.support import consumers, iam, sqs
+from tests.unit.common.sqs_consumer.support import events as hook_events
 
 RECEIVE = "sqs:ReceiveMessage"
 DELETE = "sqs:DeleteMessage"

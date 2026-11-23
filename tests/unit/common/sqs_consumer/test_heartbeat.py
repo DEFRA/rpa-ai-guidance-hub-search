@@ -9,7 +9,7 @@ import pytest
 from types_boto3_sqs import client as sqs_client
 
 from app.common.sqs_consumer import config, gateway, heartbeat, message
-from tests.common.sqs_consumer.support import iam
+from tests.unit.common.sqs_consumer.support import iam
 
 
 @pytest.fixture
@@ -54,6 +54,7 @@ class TestRun:
                 queue,
                 received,
                 config.Heartbeat(interval=0.3, visibility_timeout=5),
+                finished=asyncio.Event(),
                 report=reports.report,
                 denied=reports.deny,
             )
@@ -83,6 +84,7 @@ class TestRun:
                     queue,
                     received,
                     config.Heartbeat(interval=0.05, visibility_timeout=5),
+                    finished=asyncio.Event(),
                     report=reports.report,
                     denied=reports.deny,
                 )
@@ -117,6 +119,7 @@ class TestRun:
                 queue,
                 received,
                 config.Heartbeat(interval=0.05, visibility_timeout=5),
+                finished=asyncio.Event(),
                 report=reports.report,
                 denied=reports.deny,
             ),
@@ -142,49 +145,55 @@ class SlowQueue:
         self.finished = True
 
 
-class TestCancel:
-    async def test_waits_for_an_in_flight_request_before_returning(self):
-        queue = SlowQueue()
-        reports = Reports()
-        beat = asyncio.create_task(
+class TestStopping:
+    def start(
+        self, queue: SlowQueue, reports: Reports, finished: asyncio.Event
+    ) -> asyncio.Task[None]:
+        return asyncio.create_task(
             heartbeat.run(
                 queue,  # type: ignore[arg-type]
                 [],
                 config.Heartbeat(interval=0.01, visibility_timeout=5),
+                finished=finished,
                 report=reports.report,
                 denied=reports.deny,
             )
         )
+
+    async def test_finishing_waits_for_an_in_flight_request(self):
+        queue = SlowQueue()
+        reports = Reports()
+        finished = asyncio.Event()
+        beat = self.start(queue, reports, finished)
         await asyncio.wait_for(queue.started.wait(), timeout=5)
 
-        beat.cancel()
+        finished.set()
         await asyncio.sleep(0.1)
 
         assert not beat.done()
 
         queue.release.set()
-        await asyncio.wait({beat}, timeout=5)
+        await asyncio.wait_for(beat, timeout=5)
 
-        assert beat.cancelled()
         assert queue.finished
         assert reports.errors == []
 
-    async def test_a_second_cancel_ends_the_wait(self):
+    async def test_finishing_between_ticks_returns_without_another_request(self):
         queue = SlowQueue()
         reports = Reports()
-        beat = asyncio.create_task(
-            heartbeat.run(
-                queue,  # type: ignore[arg-type]
-                [],
-                config.Heartbeat(interval=0.01, visibility_timeout=5),
-                report=reports.report,
-                denied=reports.deny,
-            )
-        )
+        finished = asyncio.Event()
+        finished.set()
+
+        await asyncio.wait_for(self.start(queue, reports, finished), timeout=5)
+
+        assert not queue.started.is_set()
+
+    async def test_cancelling_abandons_an_in_flight_request(self):
+        queue = SlowQueue()
+        reports = Reports()
+        beat = self.start(queue, reports, asyncio.Event())
         await asyncio.wait_for(queue.started.wait(), timeout=5)
 
-        beat.cancel()
-        await asyncio.sleep(0.05)
         beat.cancel()
         await asyncio.wait({beat}, timeout=5)
 

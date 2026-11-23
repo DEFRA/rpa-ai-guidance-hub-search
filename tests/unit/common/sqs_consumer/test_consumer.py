@@ -2,6 +2,7 @@ import asyncio
 import dataclasses
 import json
 import logging
+import threading
 
 import boto3
 import botocore.exceptions
@@ -10,9 +11,9 @@ import pytest
 from types_boto3_sqs import client as sqs_client
 
 from app.common.sqs_consumer import config, consumer, errors, hooks, message
-from tests.common.sqs_consumer.fixtures import sqs_messages
-from tests.common.sqs_consumer.support import consumers, iam, sqs
-from tests.common.sqs_consumer.support import events as hook_events
+from tests.unit.common.sqs_consumer.fixtures import sqs_messages
+from tests.unit.common.sqs_consumer.support import consumers, iam, sqs
+from tests.unit.common.sqs_consumer.support import events as hook_events
 
 RECEIVE = "sqs:ReceiveMessage"
 DELETE = "sqs:DeleteMessage"
@@ -659,6 +660,44 @@ class TestLifecycle:
         await subject.stop(shutdown_timeout=0.2)
 
         assert cancelled.is_set()
+        assert not subject.is_running
+        assert sqs.depth(client, queue_url) == (0, 1)
+
+    async def test_stop_timeout_abandons_an_in_flight_heartbeat(
+        self, client: sqs_client.SQSClient, queue_url: str
+    ):
+        consumers.send(client, queue_url, "a")
+        started = asyncio.Event()
+        in_flight = threading.Event()
+        unblock = threading.Event()
+
+        def block(**_: object) -> None:
+            in_flight.set()
+            unblock.wait(timeout=10)
+
+        client.meta.events.register(
+            "before-call.sqs.ChangeMessageVisibilityBatch", block
+        )
+
+        async def stuck(_item: message.Message) -> None:
+            started.set()
+            await asyncio.sleep(30)
+
+        subject = consumers.build(
+            queue_url,
+            client=client,
+            handler=stuck,
+            heartbeat=config.Heartbeat(interval=0.05, visibility_timeout=5),
+        )
+        await subject.start()
+        await started.wait()
+        await sqs.wait_for(in_flight.is_set)
+
+        try:
+            await asyncio.wait_for(subject.stop(shutdown_timeout=0.05), timeout=1)
+        finally:
+            unblock.set()
+
         assert not subject.is_running
         assert sqs.depth(client, queue_url) == (0, 1)
 

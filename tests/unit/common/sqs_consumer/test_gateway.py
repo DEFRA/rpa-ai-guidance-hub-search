@@ -11,7 +11,7 @@ import pytest
 from types_boto3_sqs import client as sqs_client
 
 from app.common.sqs_consumer import config, errors, gateway, message
-from tests.common.sqs_consumer.support import sqs
+from tests.unit.common.sqs_consumer.support import sqs
 
 trace_id: contextvars.ContextVar[str] = contextvars.ContextVar("trace_id")
 

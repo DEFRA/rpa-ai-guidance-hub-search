@@ -5,7 +5,7 @@ import moto
 import pytest
 from types_boto3_sqs import client as sqs_client
 
-from tests.common.sqs_consumer.support import events, iam, sqs
+from tests.unit.common.sqs_consumer.support import events, iam, sqs
 
 
 @pytest.fixture(autouse=True)

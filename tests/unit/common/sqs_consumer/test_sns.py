@@ -1,7 +1,7 @@
 import json
 
 from app.common.sqs_consumer import sns
-from tests.common.sqs_consumer.fixtures import sns_envelopes
+from tests.unit.common.sqs_consumer.fixtures import sns_envelopes
 
 
 class TestParse:
