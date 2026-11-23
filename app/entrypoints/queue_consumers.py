@@ -1,0 +1,114 @@
+"""The service's queue consumers: an entry point, like the HTTP routes.
+
+Each queue belongs to the sub-domain it reaches: the indexing queue's guide
+events to `ingestion` (`ingestion.preparation`). Only this module knows SQS
+messages: it hands each handler the message's event, with the event's trace id
+set for the handler's logs, and the handler raises to leave a message to be
+retried.
+
+Each is an `sqs_consumer` consumer, entered with `async with` around the app's
+`yield`, as the package's FastAPI example does. They share the app's SQS
+client, so their endpoint comes from `AppConfig` like every other client's.
+
+A heartbeat keeps a message hidden while its handler runs, however long that
+takes, so a slow message is never handed to another consumer meanwhile. On
+shutdown each waits up to `SQS_SHUTDOWN_TIMEOUT_SECONDS` for handlers in
+flight; uvicorn's graceful shutdown is given longer (`entrypoints.fastapi`).
+"""
+
+from collections.abc import Awaitable, Callable, Sequence
+from typing import TYPE_CHECKING, Any
+
+import sqs_consumer
+
+from app import config as app_config
+from app.common import cloudevents, metrics, tracing
+from app.indexing import index_sync, stages
+from app.indexing.prepare import document_preparer
+from app.ingestion import models as ingestion_models
+from app.ingestion import preparation
+
+if TYPE_CHECKING:
+    from types_boto3_s3 import S3Client
+    from types_boto3_sqs import SQSClient
+
+FAILED_METRIC = "IngestionFailed"
+
+PREPARE_CONCURRENCY = 4
+"""Messages the preparation worker handles at once: the most one poll returns.
+
+Each makes one S3 call at a time, so this bounds the calls they make together.
+"""
+
+HEARTBEAT = sqs_consumer.Heartbeat(interval=20, visibility_timeout=60)
+"""Extends a message's visibility every 20s to the queues' own 60s."""
+
+
+def indexing_queue(
+    config: app_config.AppConfig,
+    sqs_client: SQSClient,
+    s3_client: S3Client,
+    receive: sqs_consumer.Receive | None = None,
+) -> sqs_consumer.Consumer[ingestion_models.IndexingEvent]:
+    """Consumes the indexing queue; `receive` is overridden by tests."""
+    worker = preparation.PreparationWorker(
+        preparer_for=_preparer_for(config, s3_client),
+        dispatcher=index_sync.SqsApplyDispatcher(
+            sqs_client,
+            config.search_index_sync_sqs_queue_url,
+            config.search_store_s3_bucket,
+        ),
+        client=s3_client,
+        content_bucket=config.managed_docs_s3_bucket,
+    )
+
+    return sqs_consumer.Consumer(
+        config.search_indexing_sqs_queue_url,
+        _traced(worker.handle),
+        deserializer=ingestion_models.loads,
+        receive=receive or sqs_consumer.Receive(max_messages=PREPARE_CONCURRENCY),
+        heartbeat=HEARTBEAT,
+        shutdown_timeout=config.sqs_shutdown_timeout_seconds,
+        hooks=hooks(config),
+        client=sqs_client,
+    )
+
+
+def _traced[Event: cloudevents.CloudEvent](
+    handle: Callable[[Event], Awaitable[None]],
+) -> Callable[[sqs_consumer.Message[Event]], Awaitable[None]]:
+    """A message handler that runs `handle` under the event's trace id."""
+
+    async def handle_message(item: sqs_consumer.Message[Event]) -> None:
+        event = item.payload
+        token = tracing.ctx_trace_id.set(event.cdprequestid or item.message_id)
+
+        try:
+            await handle(event)
+        finally:
+            tracing.ctx_trace_id.reset(token)
+
+    return handle_message
+
+
+def hooks(config: app_config.AppConfig) -> sqs_consumer.Hooks:
+    """Counts each failed message, when metrics are on."""
+    if not config.enable_metrics:
+        return sqs_consumer.Hooks()
+
+    async def count_failure(
+        _error: Exception, failed: Sequence[sqs_consumer.Message[Any]]
+    ) -> None:
+        metrics.counter(FAILED_METRIC, len(failed))
+
+    return sqs_consumer.Hooks(on_processing_error=count_failure)
+
+
+def _preparer_for(
+    config: app_config.AppConfig,
+    client: S3Client,
+) -> Callable[[preparation.Readers], stages.Preparer]:
+    def preparer_for(readers: preparation.Readers) -> stages.Preparer:
+        return document_preparer.from_config(config, client, readers)
+
+    return preparer_for

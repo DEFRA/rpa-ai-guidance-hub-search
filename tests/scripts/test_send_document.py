@@ -48,7 +48,15 @@ class TestSendDocument:
         url = guides.job().content_url
 
         code = send_document.main(
-            [*_ids(), "--title", "Claims Guidance", "--content-url", url]
+            [
+                *_ids(),
+                "--title",
+                "Claims Guidance",
+                "--content-url",
+                url,
+                "--version-number",
+                "1.2",
+            ]
         )
 
         (request,) = sent
@@ -61,29 +69,8 @@ class TestSendDocument:
             request_body.content_url,
             request_body.title,
         ) == ("published", url, "Claims Guidance")
-        assert "content" not in body
-
-    def test_sends_inline_content(self, sent, tmp_path):
-        guide = tmp_path / "guide.md"
-        guide.write_text("# Title\n")
-
-        send_document.main(
-            [
-                *_ids(),
-                "--title",
-                "Claims Guidance",
-                "--content-file",
-                str(guide),
-                "--version-number",
-                "1.2",
-            ],
-        )
-
-        (request,) = sent
-        body = json.loads(request.content)
-        assert body["content"] == {"markdown": "# Title\n"}
         assert body["versionNumber"] == "1.2"
-        schemas.IndexRequest.model_validate(body)
+        assert "content" not in body
 
     def test_deletes(self, sent):
         send_document.main([*_ids(), "--delete"])
@@ -107,6 +94,9 @@ class TestSendDocument:
         [
             pytest.param(["--content-url", "s3://b/k"], id="no-title"),
             pytest.param(["--title", "T"], id="no-content"),
+            pytest.param(
+                ["--title", "T", "--content-file", "guide.md"], id="content-file"
+            ),
             pytest.param(
                 ["--title", "T", "--content-url", "s3://b/k", "--delete"],
                 id="content-and-delete",

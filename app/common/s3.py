@@ -20,7 +20,8 @@ storing a document does, can take longer than the front end waits.
 
 One client serves every request and thread: boto3 clients are thread-safe. Its
 connection pool holds `MAX_POOL_CONNECTIONS`, enough for every call this service
-can make at once: the documents being prepared (`ingestion.service`) one call each,
+can make at once: the documents being prepared
+(`entrypoints.queue_consumers.PREPARE_CONCURRENCY`) one call each,
 plus the index build transfers (`index.builds`). Past the pool, urllib3 opens a
 connection for the one call and then throws it away, logging "Connection pool is
 full".
@@ -45,6 +46,7 @@ TIMEOUT_SECONDS = 2.5
 ATTEMPTS = 2
 MAX_POOL_CONNECTIONS = 20
 _MISSING = frozenset({"NoSuchKey", "404"})
+_DENIED = frozenset({"AccessDenied", "403"})
 
 client: S3Client | None = None
 
@@ -83,3 +85,8 @@ Client = Annotated["S3Client", fastapi.Depends(get_s3_client)]
 def is_missing(error: botocore_exceptions.ClientError) -> bool:
     """The object (or bucket) isn't there, as opposed to any other failure."""
     return error.response.get("Error", {}).get("Code") in _MISSING
+
+
+def is_access_denied(error: botocore_exceptions.ClientError) -> bool:
+    """The service's role may not read the object."""
+    return error.response.get("Error", {}).get("Code") in _DENIED

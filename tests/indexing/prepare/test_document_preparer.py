@@ -9,7 +9,6 @@ from app import config as app_config
 from app.index import index_schema
 from app.indexing.prepare import (
     document_preparer,
-    guide_content,
     guide_markdown,
     guide_source,
     packed_chunking,
@@ -224,10 +223,12 @@ class TestFromConfig:
             Bucket=bucket,
             CreateBucketConfiguration={"LocationConstraint": "eu-west-2"},
         )
-        inline = guide_content.InlineContent(MARKDOWN)
+        content = fake_guide_content.InMemoryContent(
+            {guides.job().content_url: MARKDOWN}
+        )
         metadata = source_metadata.GuideMetadata(version_number="1.2")
         reader = guide_source.GuideSource(
-            inline, guide_markdown.GuideMarkdownParser(), metadata
+            content, guide_markdown.GuideMarkdownParser(), metadata
         )
 
         preparer = document_preparer.from_config(

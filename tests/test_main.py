@@ -57,6 +57,11 @@ def test_lifespan(mocker):
     mocker.patch("app.common.mongo.get_db", mocker.AsyncMock(return_value=database))
     index_builds = mocker.patch("app.index.builds.get_index_build_service")
     mocker.patch("app.common.s3.get_s3_client", return_value=mocker.sentinel.s3)
+    mocker.patch("app.common.sqs.get_sqs_client", return_value=mocker.sentinel.sqs)
+    mocker.patch(
+        "app.entrypoints.queue_consumers.indexing_queue",
+        return_value=mocker.MagicMock(),
+    )
     load = mocker.patch("app.index.active_index.load", mocker.AsyncMock())
 
     stopped = asyncio.Event()
@@ -108,6 +113,7 @@ def test_main_sets_proxy_envs(mocker, monkeypatch):
     mock_config.port = 9000
     mock_config.log_config = None
     mock_config.python_env = "production"
+    mock_config.sqs_shutdown_timeout_seconds = 20
 
     # Force reload of the fastapi entrypoint module to get fresh imports
     if "app.entrypoints.fastapi" in sys.modules:
@@ -136,6 +142,7 @@ def test_main_no_proxy_in_config(mocker, monkeypatch):
     mock_config.port = 8085
     mock_config.log_config = None
     mock_config.python_env = "production"
+    mock_config.sqs_shutdown_timeout_seconds = 20
 
     # Force reload of the fastapi entrypoint module to get fresh imports
     if "app.entrypoints.fastapi" in sys.modules:
