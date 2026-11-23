@@ -159,6 +159,18 @@ class TestAppConfig:
         assert cfg.floci_endpoint_url is None
         assert cfg.http_proxy is None
         assert cfg.ingestion_mode is config.IngestionMode.HTTP
+        assert cfg.managed_docs_s3_bucket == "rpa-ai-guidance-hub-managed-docs"
+
+    def test_requires_the_index_sync_queue_to_be_fifo(self, monkeypatch):
+        """Only a FIFO queue's single message group keeps to one index writer."""
+        monkeypatch.setenv(
+            "SEARCH_INDEX_SYNC_SQS_QUEUE_URL", "http://floci:4566/000000000000/q"
+        )
+
+        with pytest.raises(pydantic.ValidationError, match="FIFO"):
+            config.AppConfig(
+                CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
+            )
 
     def test_reads_the_ingestion_mode_from_the_environment(self, monkeypatch):
         monkeypatch.setenv("INGESTION_MODE", "s3")

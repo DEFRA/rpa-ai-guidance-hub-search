@@ -135,6 +135,10 @@ class AppConfig(pydantic_settings.BaseSettings):
     mongo_truststore: str = "TRUSTSTORE_CDP_ROOT_CA"
     floci_endpoint_url: str | None = None
     search_store_s3_bucket: str = "rpa-ai-guidance-hub-search-store"
+    managed_docs_s3_bucket: str = "rpa-ai-guidance-hub-managed-docs"
+    search_indexing_sqs_queue_url: str = pydantic.Field(min_length=1)
+    search_index_sync_sqs_queue_url: str = pydantic.Field(min_length=1)
+    sqs_shutdown_timeout_seconds: int = pydantic.Field(default=20, gt=0)
     search_index_directory: pathlib.Path = (
         pathlib.Path(tempfile.gettempdir()) / "rpa-ai-guidance-hub-search"
     )
@@ -150,6 +154,16 @@ class AppConfig(pydantic_settings.BaseSettings):
     claude_sonnet_model_config: Annotated[
         BedrockModelConfig, pydantic_settings.NoDecode
     ] = pydantic.Field(..., validation_alias="CLAUDE_SONNET_MODEL_CONFIG")
+
+    @pydantic.field_validator("search_index_sync_sqs_queue_url")
+    @classmethod
+    def validate_index_sync_queue_is_fifo(cls: type[AppConfig], v: str) -> str:
+        """Only a FIFO queue keeps the index to one writer."""
+        if not v.endswith(".fifo"):
+            msg = "the index sync queue must be a FIFO queue (its URL ends in .fifo)"
+            raise ValueError(msg)
+
+        return v
 
     @pydantic.field_validator("claude_sonnet_model_config", mode="before")
     @classmethod

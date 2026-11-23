@@ -1,0 +1,14 @@
+{
+  "specversion": "1.0",
+  "id": "0199c1d4-7a2e-7c3b-9f00-3b5a1e2d4c70",
+  "source": "/rpa-ai-guidance-hub-api/guides",
+  "type": "uk.gov.defra.rpa.guidancehub.guide.version.deleted",
+  "subject": "documents/0199b8a2-0000-7000-8000-00000000f001/versions/0199b8a2-0000-7000-8000-00000000f002",
+  "time": "2026-11-13T08:30:00Z",
+  "datacontenttype": "application/json",
+  "dataschema": "urn:defra:rpa-ai-guidance-hub:events:guide-version-deleted:v1",
+  "data": {
+    "documentId": "0199b8a2-0000-7000-8000-00000000f001",
+    "versionId": "0199b8a2-0000-7000-8000-00000000f002"
+  }
+}

@@ -76,6 +76,10 @@ The `CLAUDE_SONNET_MODEL_CONFIG` format is: `model_id,inference_profile[,guardra
 | `INDEX_REFRESH_INTERVAL_SECONDS` | How often each replica checks MongoDB for a newer active index build and swaps it in. | `60` |
 | `MAX_INLINE_CONTENT_BYTES` | The largest inline `content.markdown` an index request may carry; larger is refused with 413, and should be sent as `contentUrl` | `2097152` (2 MiB) |
 | `SEARCH_STORE_S3_BUCKET` | Where sections, staged chunk sets and index builds are kept | `rpa-ai-guidance-hub-search-store` |
+| `MANAGED_DOCS_S3_BUCKET` | The only bucket a version's `contentUrl` may name; the API writes each version's `content.md` there. | `rpa-ai-guidance-hub-managed-docs` |
+| `SEARCH_INDEXING_SQS_QUEUE_URL` | The indexing queue: guide events to prepare (see [The indexing queue's events](#the-indexing-queues-events)). Standard. | required |
+| `SEARCH_INDEX_SYNC_SQS_QUEUE_URL` | The index sync queue: jobs for the index's single writer. Must be FIFO. | required |
+| `SQS_SHUTDOWN_TIMEOUT_SECONDS` | How long the queue consumers wait for messages in flight on shutdown. | `20` |
 
 ### Linting and Formatting
 
@@ -343,6 +347,41 @@ turns. A job that fails before writing fails alone; a failed write fails its
 whole batch, which publishes nothing. A failure is logged and counted
 (`IngestionFailed`, with `ENABLE_METRICS`), not retried: resending the same request
 is always safe.
+
+## The indexing queue's events
+
+The indexing queue carries guide events: [CloudEvents 1.0](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/spec.md)
+in structured JSON mode, so the whole event is the message body. They are the hub's
+events, not search's: `rpa-ai-guidance-hub-api` will publish them to its
+guide-events topic, and until it does, search's ingestion routes send the same
+events, so nothing in them assumes which service produced them. The contract is the AsyncAPI 3.0 document [`docs/asyncapi.json`](docs/asyncapi.json):
+the queue, its SQS binding, both messages with examples, and their payload
+schemas. It is generated from the event models in `app/ingestion/models.py`,
+which subclass the one CloudEvents base in `app/common/cloudevents.py`
+(`uv run task asyncapi`), and the pull-request workflow checks it is current and
+valid.
+
+| `type` | `data` |
+| --- | --- |
+| `uk.gov.defra.rpa.guidancehub.guide.version.published` | `documentId`, `versionId`, `sourceType`, `status`, `contentUrl`, `versionNumber`, `metadata` (the PUT body's keys) |
+| `uk.gov.defra.rpa.guidancehub.guide.version.deleted` | `documentId`, `versionId` |
+
+- `time` is when the version reached its status (the PUT body's `occurredAt`).
+- `subject` is `documents/{documentId}/versions/{versionId}`.
+- `source` names the producer, and is never checked: today always
+  `/rpa-ai-guidance-hub-search/ingestion`, later e.g. `/rpa-ai-guidance-hub-api/guides`.
+- `dataschema` is a producer-neutral URN naming the `data` schema and its major
+  version (`urn:defra:rpa-ai-guidance-hub:events:guide-version-published:v1`);
+  the AsyncAPI document gives each schema its URN as `$id`.
+- The `cdprequestid` extension carries the CDP trace id.
+
+Within v1, changes are additive and readers ignore what they don't know. A
+breaking change to `data` is a new schema and URN (`…:v2`), with the same `type`. An event of another type is acknowledged and ignored. An event of a
+known type that doesn't validate, or names a schema version the service doesn't
+read, is dead-lettered.
+
+If the topic's subscription doesn't use raw message delivery, the events arrive
+inside an SNS envelope; setting the consumer's `unwrap_sns=True` reads both forms.
 
 ## Custom Cloudwatch Metrics
 

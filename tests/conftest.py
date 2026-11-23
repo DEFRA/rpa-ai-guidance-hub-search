@@ -14,6 +14,14 @@ os.environ.setdefault("SOURCE_DOCS_S3_BUCKET", "rpa-ai-guidance-hub-source-docs"
 os.environ.setdefault("MANAGED_DOCS_S3_BUCKET", "rpa-ai-guidance-hub-managed-docs")
 os.environ.setdefault("SEARCH_STORE_S3_BUCKET", "rpa-ai-guidance-hub-search-store")
 os.environ.setdefault(
+    "SEARCH_INDEXING_SQS_QUEUE_URL",
+    "http://localhost:4566/000000000000/rpa_ai_guidance_hub_search_indexing",
+)
+os.environ.setdefault(
+    "SEARCH_INDEX_SYNC_SQS_QUEUE_URL",
+    "http://localhost:4566/000000000000/rpa_ai_guidance_hub_search_index_sync.fifo",
+)
+os.environ.setdefault(
     "CLAUDE_SONNET_MODEL_CONFIG",
     "anthropic.claude-sonnet-4-6,arn:aws:bedrock:eu-west-2:123456789012:application-inference-profile/fake-profile-test",
 )
