@@ -37,4 +37,5 @@ search_indexing_arn=$(aws sqs get-queue-attributes --endpoint-url=http://localho
   --attribute-names QueueArn --query Attributes.QueueArn --output text)
 aws sns subscribe --endpoint-url=http://localhost:4566 \
   --topic-arn "${guide_events_topic_arn}" --protocol sqs \
-  --notification-endpoint "${search_indexing_arn}" || true
+  --notification-endpoint "${search_indexing_arn}" \
+  --attributes RawMessageDelivery=true || true
