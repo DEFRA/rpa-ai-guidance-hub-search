@@ -48,7 +48,6 @@ class KnownEvent(CloudEvent):
     """
 
     TYPE: ClassVar[str]
-    DATASCHEMA: ClassVar[str]
 
     time: pydantic.AwareDatetime
     datacontenttype: Literal["application/json"] = DATA_CONTENT_TYPE
@@ -59,12 +58,12 @@ class KnownEvent(CloudEvent):
         super().__pydantic_init_subclass__(**kwargs)
 
         cls.TYPE = _only_literal(cls, "type")
-        cls.DATASCHEMA = _only_literal(cls, "dataschema")
+        _only_literal(cls, "dataschema")
 
     @classmethod
     def tag(cls) -> str:
         """The discriminator tag of this version of this type."""
-        return tag(cls.TYPE, cls.DATASCHEMA)
+        return tag(cls.TYPE, _only_literal(cls, "dataschema"))
 
 
 def _only_literal(model: type[pydantic.BaseModel], field: str) -> str:

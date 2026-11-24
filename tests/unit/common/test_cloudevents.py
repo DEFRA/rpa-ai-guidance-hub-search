@@ -180,7 +180,7 @@ class TestReading:
 class TestKnownEvents:
     def test_take_their_type_and_dataschema_from_their_literals(self):
         assert Ping.TYPE == PING
-        assert Ping.DATASCHEMA == PING_V1
+        assert Ping.tag() == cloudevents.tag(PING, PING_V1)
         assert Ping.tag() != PingV2.tag()
 
     def test_refuse_a_dataschema_that_is_not_one_literal(self):
@@ -191,8 +191,9 @@ class TestKnownEvents:
                 dataschema: str
 
 
-def test_new_ids_are_uuid7s_and_never_repeat():
-    first, second = cloudevents.new_id(), cloudevents.new_id()
+class TestNewIds:
+    def test_are_uuid7s_and_never_repeat(self):
+        first, second = cloudevents.new_id(), cloudevents.new_id()
 
-    assert first != second
-    assert uuid.UUID(first).version == 7
+        assert first != second
+        assert uuid.UUID(first).version == 7

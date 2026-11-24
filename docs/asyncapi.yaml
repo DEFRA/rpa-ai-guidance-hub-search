@@ -85,10 +85,12 @@ components:
       properties:
         documentId:
           format: uuid
+          pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$
           title: Documentid
           type: string
         versionId:
           format: uuid
+          pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$
           title: Versionid
           type: string
       required:
@@ -156,10 +158,12 @@ components:
       $id: urn:defra:rpa-ai-guidance-hub:events:guide-version-published:v1
       properties:
         contentUrl:
+          pattern: ^s3://[^/?#]+/+[^/?#]
           title: Contenturl
           type: string
         documentId:
           format: uuid
+          pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$
           title: Documentid
           type: string
         metadata:
@@ -188,6 +192,7 @@ components:
               title: Guidancetype
             guideTitle:
               minLength: 1
+              pattern: \S
               title: Guidetitle
               type: string
             owner:
@@ -234,6 +239,7 @@ components:
           type: string
         versionId:
           format: uuid
+          pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$
           title: Versionid
           type: string
         versionNumber:

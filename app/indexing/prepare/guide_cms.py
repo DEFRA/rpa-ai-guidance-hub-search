@@ -29,8 +29,20 @@ def _uuid7(value: uuid.UUID) -> uuid.UUID:
     return value
 
 
+UUID7_PATTERN = (
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}"
+    r"-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+)
+"""A UUIDv7 in its hyphenated form, for schemas: the check `_uuid7` makes."""
+
 # The CMS mints every guide and version id as a UUIDv7.
-CmsId = Annotated[uuid.UUID, pydantic.AfterValidator(_uuid7)]
+CmsId = Annotated[
+    uuid.UUID,
+    pydantic.AfterValidator(_uuid7),
+    pydantic.WithJsonSchema(
+        {"type": "string", "format": "uuid", "pattern": UUID7_PATTERN}
+    ),
+]
 
 
 class _CmsModel(pydantic.BaseModel):

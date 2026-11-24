@@ -4,19 +4,22 @@
 import argparse
 import datetime as dt
 import json
-import sys
 import pathlib
+import sys
 import uuid
 from collections.abc import Iterator
 from typing import Any
 
+import pydantic
 import yaml
 from pydantic import json_schema
 
 from app.common import cloudevents
 from app.ingestion import models as ingestion_models
 
-ASYNCAPI_PATH = pathlib.Path(__file__).resolve().parent.parent / "docs" / "asyncapi.json"
+ASYNCAPI_PATH = (
+    pathlib.Path(__file__).resolve().parent.parent / "docs" / "asyncapi.json"
+)
 
 ASYNCAPI_VERSION = "3.0.0"
 DOCUMENT_VERSION = "1.0.0"
@@ -177,7 +180,7 @@ def _schemas() -> dict[str, Any]:
     schemas: dict[str, Any] = definitions["$defs"]
 
     for event in events:
-        data_model = event.model_fields["data"].annotation
+        data_model = _data_model(event)
         schemas[data_model.__name__] = _inlined(
             data_model.model_json_schema(by_alias=True)
         )
@@ -185,6 +188,18 @@ def _schemas() -> dict[str, Any]:
     used = _reachable(schemas, [event.__name__ for event in events])
 
     return {name: schema for name, schema in schemas.items() if name in used}
+
+
+def _data_model(event: type[cloudevents.KnownEvent]) -> type[pydantic.BaseModel]:
+    annotation = event.model_fields["data"].annotation
+
+    if not isinstance(annotation, type) or not issubclass(
+        annotation, pydantic.BaseModel
+    ):
+        msg = f"{event.__name__}.data must be a pydantic model"
+        raise TypeError(msg)
+
+    return annotation
 
 
 def _inlined(schema: dict[str, Any]) -> dict[str, Any]:

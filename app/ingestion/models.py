@@ -27,6 +27,12 @@ GUIDE_VERSION_DELETED_V1: Final = (
 )
 INGESTION_SOURCE = "/rpa-ai-guidance-hub-search/ingestion"
 
+NOT_BLANK_PATTERN: Final = r"\S"
+"""Some text that isn't whitespace, for schemas."""
+
+S3_URL_PATTERN: Final = r"^s3://[^/?#]+/+[^/?#]"
+"""An `s3://bucket/key` URL with a key, for schemas: what `parse_s3_url` reads."""
+
 
 class _DataModel(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(
@@ -41,7 +47,9 @@ class GuideMetadata(guide_cms.CmsGuideMetadata):
     """The CMS's metadata; `guideTitle` is required, and is the indexed title."""
 
     guide_title: Annotated[
-        str, pydantic.StringConstraints(strip_whitespace=True, min_length=1)
+        str,
+        pydantic.StringConstraints(strip_whitespace=True, min_length=1),
+        pydantic.Field(json_schema_extra={"pattern": NOT_BLANK_PATTERN}),
     ]
 
 
@@ -51,7 +59,11 @@ def _s3_url(url: str) -> str:
     return url
 
 
-S3Url = Annotated[str, pydantic.AfterValidator(_s3_url)]
+S3Url = Annotated[
+    str,
+    pydantic.AfterValidator(_s3_url),
+    pydantic.Field(json_schema_extra={"pattern": S3_URL_PATTERN}),
+]
 
 
 class GuideVersionPublishedDataV1(_DataModel):
