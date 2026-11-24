@@ -1,14 +1,14 @@
 """Prepares each guide event from the indexing queue for the index writer.
 
-The writer runs in this process (`dispatch.BatchingDispatcher`), one per
-replica, as the ingestion routes' did. A dispatch returns once its job is
-written, so a message is acknowledged only after the index has it.
+Each job goes to the index writer on the index sync queue (`index_sync`). A
+dispatch returns once its job is queued, so a message is acknowledged once the
+writer will get its job, not once the index has it.
 
-Messages are handled several at once and not in arrival order. The applier keeps
-the index safe whichever order jobs reach it in, but the files a version stages
-are not: events for the same version take turns (`VersionLocks`), so a
-publication that is still preparing can't stage files again after a deletion
-has cleaned them up, nor two preparations mix their sections and chunks.
+Messages are handled several at once and not in arrival order. Events for the
+same version take turns (`VersionLocks`), so two preparations can't mix their
+sections and chunks, and a version's jobs reach the index sync queue in the
+order they were handled. The writer deletes a removed version's staged files,
+after any job queued before the removal has read them.
 """
 
 import asyncio
@@ -20,11 +20,10 @@ from typing import TYPE_CHECKING
 from botocore import exceptions as botocore_exceptions
 
 from app.common import cloudevents, s3
-from app.index import index_schema
-from app.indexing import dispatch, jobs, stages
+from app.indexing import dispatch, stages
 from app.indexing.prepare import guide_content, sources
 from app.ingestion import models
-from app.records import chunk_set_store, ids, section_store
+from app.records import ids
 from app.records import models as record_models
 
 if TYPE_CHECKING:
@@ -84,27 +83,21 @@ class PreparationWorker:
         dispatcher: dispatch.ApplyDispatcher,
         client: S3Client,
         content_bucket: str,
-        sections: section_store.SectionStore,
-        chunk_sets: chunk_set_store.ChunkSetStore,
-        strategy: str = index_schema.CHUNK_STRATEGY,
         versions: VersionLocks | None = None,
     ) -> None:
         self._preparer_for = preparer_for
         self._dispatcher = dispatcher
         self._client = client
         self._content_bucket = content_bucket
-        self._sections = sections
-        self._chunk_sets = chunk_sets
-        self._strategy = strategy
         self._versions = versions or VersionLocks()
 
     async def handle(self, event: models.IndexingEvent) -> None:
-        """Indexes a published version, or removes a deleted one; ignores the rest."""
+        """Prepares a published version, or forwards a deletion; ignores the rest."""
         match event:
             case models.GuideVersionPublishedV1():
                 await self._index(event)
             case models.GuideVersionDeletedV1():
-                await self._remove(event.to_job())
+                await self._remove(event)
             case cloudevents.UnknownEvent():
                 logger.info(
                     "Ignored %s event %s from %s", event.type, event.id, event.source
@@ -130,23 +123,18 @@ class PreparationWorker:
             await self._dispatcher.dispatch(apply_job)
 
         logger.info(
-            "Indexed %s version %s", apply_job.document_id, apply_job.version_id
+            "Queued %s version %s for the index",
+            apply_job.document_id,
+            apply_job.version_id,
         )
 
-    async def _remove(self, job: jobs.RemoveJob) -> None:
-        """Takes the version out of the index, then deletes its staged files.
+    async def _remove(self, event: models.GuideVersionDeletedV1) -> None:
+        job = event.to_job()
 
-        If the removal fails the files are kept, so the retry still finds them.
-        """
         async with self._versions.hold(job.document_id, job.version_id):
             await self._dispatcher.dispatch(job)
 
-            await self._sections.delete(job.document_id, job.version_id)
-            await self._chunk_sets.delete(
-                self._strategy, job.document_id, job.version_id
-            )
-
-        logger.info("Removed %s version %s", job.document_id, job.version_id)
+        logger.info("Queued removal of %s version %s", job.document_id, job.version_id)
 
 
 def _log_unreadable(

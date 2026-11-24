@@ -1,8 +1,8 @@
 """The service's queue consumers: an entry point, like the HTTP routes.
 
 Each queue belongs to the sub-domain it reaches: the indexing queue's guide
-events to `ingestion` (`ingestion.preparation`), which writes the index in
-this process through `dispatch.BatchingDispatcher`. Only this module knows SQS
+events to `ingestion` (`ingestion.preparation`), which sends each prepared job
+to the index sync queue (`indexing.index_sync`). Only this module knows SQS
 messages: it hands each handler the message's event, with the event's trace id
 set for the handler's logs, and the handler raises to leave a message to be
 retried.
@@ -26,13 +26,10 @@ from app.common import cloudevents, metrics, tracing
 from app.common.sqs_consumer import config as consumer_config
 from app.common.sqs_consumer import consumer, message
 from app.common.sqs_consumer import hooks as consumer_hooks
-from app.index import builds
-from app.indexing import dispatch, stages
-from app.indexing.apply import document_applier
+from app.indexing import index_sync, stages
 from app.indexing.prepare import document_preparer
 from app.ingestion import models as ingestion_models
 from app.ingestion import preparation
-from app.records import chunk_set_store, section_store
 
 if TYPE_CHECKING:
     from types_boto3_s3 import S3Client
@@ -56,25 +53,18 @@ def indexing_queue(
     config: app_config.AppConfig,
     sqs_client: SQSClient,
     s3_client: S3Client,
-    index_builds: builds.IndexBuildService,
     receive: consumer_config.Receive | None = None,
 ) -> consumer.Consumer[ingestion_models.IndexingEvent]:
-    """Consumes the indexing queue; `receive` is overridden by tests.
-
-    Every message handled at once shares one `PendingWrites`, so the jobs that
-    arrive while the index is being published go together in the next publish.
-    """
-    store_bucket = config.search_store_s3_bucket
+    """Consumes the indexing queue; `receive` is overridden by tests."""
     worker = preparation.PreparationWorker(
         preparer_for=_preparer_for(config, s3_client),
-        dispatcher=dispatch.BatchingDispatcher(
-            dispatch.PendingWrites(),
-            document_applier.publisher(config, s3_client, index_builds),
+        dispatcher=index_sync.SqsApplyDispatcher(
+            sqs_client,
+            config.search_index_sync_sqs_queue_url,
+            config.search_store_s3_bucket,
         ),
         client=s3_client,
         content_bucket=config.managed_docs_s3_bucket,
-        sections=section_store.S3SectionStore(s3_client, store_bucket),
-        chunk_sets=chunk_set_store.S3ChunkSetStore(s3_client, store_bucket),
     )
 
     return consumer.Consumer(
