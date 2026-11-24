@@ -1,5 +1,7 @@
 """The queue consumers: wired to the configured queues, as the package expects."""
 
+import logging
+
 import pytest
 
 from app import config as app_config
@@ -8,6 +10,8 @@ from app.common.sqs_consumer import message
 from app.entrypoints import queue_consumers
 from app.ingestion import models as ingestion_models
 from tests.support import events
+from tests.unit.common.sqs_consumer.support import consumers
+from tests.unit.common.sqs_consumer.support import sqs as consumer_sqs
 
 
 @pytest.fixture
@@ -26,9 +30,37 @@ class TestHooks:
         on = config.model_copy(update={"enable_metrics": True})
 
         hook = queue_consumers.hooks(on).on_processing_error
-        await hook(RuntimeError("failed"), [mocker.Mock(), mocker.Mock()])
+        await hook(
+            RuntimeError("failed"),
+            [_message(events.deleted(), "m-1"), _message(events.deleted(), "m-2")],
+        )
 
         counter.assert_called_once_with(queue_consumers.FAILED_METRIC, 2)
+
+    async def test_log_each_failure_with_metrics(
+        self, mocker, config, moto_sqs, caplog
+    ):
+        counter = mocker.patch("app.common.metrics.counter")
+        on = config.model_copy(update={"enable_metrics": True})
+        queue_url = moto_sqs.create_queue(QueueName="indexing")["QueueUrl"]
+        sent = moto_sqs.send_message(QueueUrl=queue_url, MessageBody="a")
+
+        async def fail(_item):
+            msg = "index publish failed"
+            raise RuntimeError(msg)
+
+        subject = consumers.build(
+            queue_url, client=moto_sqs, handler=fail, hooks=queue_consumers.hooks(on)
+        )
+
+        with caplog.at_level(logging.ERROR, logger=queue_consumers.__name__):
+            async with subject:
+                await consumer_sqs.wait_for(lambda: counter.called)
+
+        (record,) = [r for r in caplog.records if r.name == queue_consumers.__name__]
+        assert sent["MessageId"] in record.getMessage()
+        assert record.exc_info is not None
+        assert str(record.exc_info[1]) == "index publish failed"
 
 
 def _message(event, message_id="m-1"):
@@ -75,5 +107,8 @@ class TestTraced:
             msg = "failed"
             raise RuntimeError(msg)
 
+        handle_message = queue_consumers._traced(handle)
+        item = _message(events.deleted())
+
         with pytest.raises(RuntimeError, match="failed"):
-            await queue_consumers._traced(handle)(_message(events.deleted()))
+            await handle_message(item)

@@ -87,9 +87,10 @@ class TestEventIds:
 class TestToJob:
     def test_refuses_a_chunk_set_in_another_bucket(self):
         body = cloudevents.dumps(indexing_models.from_job(events.apply_job(), BUCKET))
+        event = indexing_models.loads(body)
 
         with pytest.raises(indexing_models.ChunkSetBucketNotAllowedError):
-            indexing_models.loads(body).to_job("someone-elses")
+            event.to_job("someone-elses")
 
 
 class TestLoads:

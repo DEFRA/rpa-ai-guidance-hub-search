@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Write the AsyncAPI document of the service's queues to `docs/asyncapi.json` and `.yaml`, or check them."""
+"""Write the AsyncAPI document of the service's queues to `docs/asyncapi.yaml`, or check it."""
 
 import argparse
 import dataclasses
@@ -22,7 +22,7 @@ from app.ingestion import models as ingestion_models
 from app.records import ids, models
 
 ASYNCAPI_PATH = (
-    pathlib.Path(__file__).resolve().parent.parent / "docs" / "asyncapi.json"
+    pathlib.Path(__file__).resolve().parent.parent / "docs" / "asyncapi.yaml"
 )
 
 ASYNCAPI_VERSION = "3.0.0"
@@ -121,10 +121,6 @@ def channels() -> tuple[Channel, ...]:
 
 
 def render() -> str:
-    return json.dumps(document(), indent=2, sort_keys=True) + "\n"
-
-
-def render_yaml() -> str:
     return yaml.safe_dump(document(), sort_keys=True, allow_unicode=True, width=88)
 
 
@@ -391,34 +387,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="fail if docs/asyncapi.json differs from what the models generate",
+        help="fail if docs/asyncapi.yaml differs from what the models generate",
     )
     args = parser.parse_args(argv)
 
-    outputs = {
-        ASYNCAPI_PATH: render(),
-        ASYNCAPI_PATH.with_suffix(".yaml"): render_yaml(),
-    }
+    rendered = render()
 
     if not args.check:
-        for path, rendered in outputs.items():
-            path.write_text(rendered)
+        ASYNCAPI_PATH.write_text(rendered)
 
         return 0
 
-    stale = [
-        path
-        for path, rendered in outputs.items()
-        if not path.exists() or path.read_text() != rendered
-    ]
+    if ASYNCAPI_PATH.exists() and ASYNCAPI_PATH.read_text() == rendered:
+        return 0
 
-    for path in stale:
-        sys.stderr.write(
-            f"docs/{path.name} is out of date; run `uv run task asyncapi` "
-            "and commit the result.\n"
-        )
+    sys.stderr.write(
+        f"docs/{ASYNCAPI_PATH.name} is out of date; run `uv run task asyncapi` "
+        "and commit the result.\n"
+    )
 
-    return 1 if stale else 0
+    return 1
 
 
 if __name__ == "__main__":
