@@ -1,4 +1,9 @@
-"""Prepares each guide event from the indexing queue for the index writer."""
+"""Prepares each guide event from the indexing queue for the index writer.
+
+The writer runs in this process (`dispatch.BatchingDispatcher`), one per
+replica, as the ingestion routes' did. A dispatch returns once its job is
+written, so a message is acknowledged only after the index has it.
+"""
 
 import logging
 from collections.abc import Callable, Mapping
@@ -7,9 +12,11 @@ from typing import TYPE_CHECKING
 from botocore import exceptions as botocore_exceptions
 
 from app.common import cloudevents, s3
-from app.indexing import dispatch, stages
+from app.index import index_schema
+from app.indexing import dispatch, jobs, stages
 from app.indexing.prepare import guide_content, sources
 from app.ingestion import models
+from app.records import chunk_set_store, section_store
 from app.records import models as record_models
 
 if TYPE_CHECKING:
@@ -31,24 +38,25 @@ class PreparationWorker:
         dispatcher: dispatch.ApplyDispatcher,
         client: S3Client,
         content_bucket: str,
+        sections: section_store.SectionStore,
+        chunk_sets: chunk_set_store.ChunkSetStore,
+        strategy: str = index_schema.CHUNK_STRATEGY,
     ) -> None:
         self._preparer_for = preparer_for
         self._dispatcher = dispatcher
         self._client = client
         self._content_bucket = content_bucket
+        self._sections = sections
+        self._chunk_sets = chunk_sets
+        self._strategy = strategy
 
     async def handle(self, event: models.IndexingEvent) -> None:
-        """Prepares a published version, or forwards a deletion; ignores the rest."""
+        """Indexes a published version, or removes a deleted one; ignores the rest."""
         match event:
             case models.GuideVersionPublishedV1():
                 await self._index(event)
             case models.GuideVersionDeletedV1():
-                await self._dispatcher.dispatch(event.to_job())
-                logger.info(
-                    "Queued removal of %s version %s",
-                    event.document_id,
-                    event.version_id,
-                )
+                await self._remove(event.to_job())
             case cloudevents.UnknownEvent():
                 logger.info(
                     "Ignored %s event %s from %s", event.type, event.id, event.source
@@ -72,10 +80,19 @@ class PreparationWorker:
 
         await self._dispatcher.dispatch(apply_job)
         logger.info(
-            "Queued %s version %s for the index",
-            apply_job.document_id,
-            apply_job.version_id,
+            "Indexed %s version %s", apply_job.document_id, apply_job.version_id
         )
+
+    async def _remove(self, job: jobs.RemoveJob) -> None:
+        """Takes the version out of the index, then deletes its staged files.
+
+        If the removal fails the files are kept, so the retry still finds them.
+        """
+        await self._dispatcher.dispatch(job)
+
+        await self._sections.delete(job.document_id, job.version_id)
+        await self._chunk_sets.delete(self._strategy, job.document_id, job.version_id)
+        logger.info("Removed %s version %s", job.document_id, job.version_id)
 
 
 def _log_unreadable(

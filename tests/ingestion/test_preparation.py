@@ -1,4 +1,4 @@
-"""The preparation worker prepares published guide versions and forwards every job."""
+"""The preparation worker prepares published guide versions and dispatches every job."""
 
 import boto3
 import moto
@@ -17,12 +17,16 @@ BUCKET = guides.BUCKET
 
 
 class RecordingDispatcher:
-    """Implements `dispatch.ApplyDispatcher`, keeping each job."""
+    """Implements `dispatch.ApplyDispatcher`, keeping each job, or raising."""
 
     def __init__(self) -> None:
         self.jobs: list[jobs.WriteJob] = []
+        self.error: Exception | None = None
 
     async def dispatch(self, job: jobs.WriteJob) -> None:
+        if self.error is not None:
+            raise self.error
+
         self.jobs.append(job)
 
 
@@ -64,6 +68,8 @@ def worker(s3_client, stores, dispatcher):
         dispatcher=dispatcher,
         client=s3_client,
         content_bucket=BUCKET,
+        sections=sections,
+        chunk_sets=staged,
     )
 
 
@@ -139,10 +145,38 @@ class TestPublished:
 
 
 class TestDeleted:
-    async def test_forwards_the_remove_job(self, worker, dispatcher):
+    async def test_dispatches_the_remove_job(self, worker, dispatcher):
         await worker.handle(events.deleted())
 
         assert dispatcher.jobs == [events.deleted().to_job()]
+
+    async def test_deletes_the_staged_files_once_removed(
+        self, worker, s3_client, stores, dispatcher
+    ):
+        _upload(s3_client)
+        sections, staged = stores
+        await worker.handle(events.published())
+        (apply_job,) = dispatcher.jobs
+
+        await worker.handle(events.deleted())
+
+        assert await sections.get(guides.DOCUMENT_ID, guides.VERSION_ID) is None
+        assert await staged.get(apply_job.chunk_set_key) is None
+
+    async def test_keeps_the_staged_files_when_the_removal_fails(
+        self, worker, s3_client, stores, dispatcher
+    ):
+        _upload(s3_client)
+        sections, staged = stores
+        await worker.handle(events.published())
+        (apply_job,) = dispatcher.jobs
+        dispatcher.error = RuntimeError("publish failed")
+
+        with pytest.raises(RuntimeError, match="publish failed"):
+            await worker.handle(events.deleted())
+
+        assert await sections.get(guides.DOCUMENT_ID, guides.VERSION_ID) is not None
+        assert await staged.get(apply_job.chunk_set_key) is not None
 
 
 class TestUnknown:
