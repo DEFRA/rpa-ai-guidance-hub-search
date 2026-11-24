@@ -350,6 +350,12 @@ whose `models.py` defines its events; the consumers are entry points
    group, so SQS hands them to one receiver at a time across all replicas. Each
    is deduplicated by its event's `id`, which is derived from what the event says,
    so a retried preparation sends one event.
+4. **Index writer** (`app/indexing/apply/index_writer.py`, one receiver at a
+   time, up to 10 messages). It publishes the batch's jobs to the index in one
+   publish, then deletes each removed version's sections and staged chunk set.
+   The first message that fails, and every one after it in the batch, are left
+   to be retried, so the queue's order holds; rewriting a job already written
+   changes nothing.
 
 A message whose handler fails is retried after its visibility timeout, and moved
 to the queue's `-deadletter` queue after 3 receives: content that is missing or

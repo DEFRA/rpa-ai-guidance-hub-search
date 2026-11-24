@@ -6,8 +6,9 @@ import pytest
 
 from app import config as app_config
 from app.common import cloudevents, tracing
-from app.common.sqs_consumer import message
+from app.common.sqs_consumer import errors, message
 from app.entrypoints import queue_consumers
+from app.indexing import models as indexing_models
 from app.ingestion import models as ingestion_models
 from tests.support import events
 from tests.unit.common.sqs_consumer.support import consumers
@@ -112,3 +113,107 @@ class TestTraced:
 
         with pytest.raises(RuntimeError, match="failed"):
             await handle_message(item)
+
+
+BUCKET = "search-store"
+
+
+class RecordingWriter:
+    """Implements `queue_consumers.Writer`: records each batch, answers `outcomes`."""
+
+    def __init__(self, outcomes=None, raises=None):
+        self.batches = []
+        self._outcomes = outcomes
+        self._raises = raises
+
+    async def write(self, batch):
+        self.batches.append(list(batch))
+
+        if self._raises is not None:
+            raise self._raises
+
+        return self._outcomes or [None] * len(batch)
+
+
+def _index_sync_message(body, number):
+    return message.Message.from_sqs(
+        {"MessageId": f"m-{number}", "ReceiptHandle": f"r-{number}", "Body": body},
+        deserializer=indexing_models.loads,
+    )
+
+
+def _job_message(job, number=0, bucket=BUCKET, trace_id=None):
+    event = indexing_models.from_job(job, bucket, trace_id)
+    return _index_sync_message(cloudevents.dumps(event), number)
+
+
+class TestWrittenBy:
+    """The writer's batch handler keeps the FIFO queue's order."""
+
+    async def test_writes_the_batch_s_jobs_together_in_order(self):
+        writer = RecordingWriter()
+        batch = [
+            _job_message(events.apply_job("k/1"), 0),
+            _job_message(events.remove_job(), 1),
+        ]
+
+        await queue_consumers._written_by(writer, BUCKET)(batch)
+
+        assert writer.batches == [[events.apply_job("k/1"), events.remove_job()]]
+
+    async def test_fails_a_failed_job_and_holds_back_every_later_one(self):
+        missing = RuntimeError("nothing staged")
+        first = _job_message(events.apply_job("k/1"), 0)
+        second = _job_message(events.apply_job("k/2"), 1)
+        third = _job_message(events.apply_job("k/3"), 2)
+        writer = RecordingWriter(outcomes=[None, missing, None])
+
+        with pytest.raises(errors.BatchFailureError) as raised:
+            await queue_consumers._written_by(writer, BUCKET)([first, second, third])
+
+        assert list(raised.value.failed) == [second, third]
+        assert raised.value.failed[second] is missing
+        assert isinstance(raised.value.failed[third], queue_consumers.HeldBackError)
+
+    async def test_fails_the_whole_batch_when_the_writer_raises(self):
+        writer = RecordingWriter(raises=RuntimeError("write failed"))
+
+        with pytest.raises(RuntimeError, match="write failed"):
+            await queue_consumers._written_by(writer, BUCKET)(
+                [_job_message(events.apply_job())]
+            )
+
+    async def test_writes_only_what_comes_before_an_unreadable_message(self):
+        writer = RecordingWriter()
+        before = _job_message(events.apply_job("k/1"), 0)
+        bad = _index_sync_message("not json", 1)
+        after = _job_message(events.apply_job("k/2"), 2)
+
+        with pytest.raises(errors.BatchFailureError) as raised:
+            await queue_consumers._written_by(writer, BUCKET)([before, bad, after])
+
+        assert writer.batches == [[events.apply_job("k/1")]]
+        assert list(raised.value.failed) == [bad, after]
+        assert isinstance(raised.value.failed[bad], errors.DeserializationError)
+        assert isinstance(raised.value.failed[after], queue_consumers.HeldBackError)
+
+    async def test_refuses_a_chunk_set_in_another_bucket(self):
+        writer = RecordingWriter()
+        elsewhere = _job_message(events.apply_job(), bucket="someone-elses")
+
+        with pytest.raises(errors.BatchFailureError) as raised:
+            await queue_consumers._written_by(writer, BUCKET)([elsewhere])
+
+        assert isinstance(
+            raised.value.failed[elsewhere],
+            indexing_models.ChunkSetBucketNotAllowedError,
+        )
+        assert writer.batches == []
+
+    async def test_logs_each_written_job_with_its_trace_id(self, caplog):
+        written = _job_message(events.apply_job(), trace_id="t-7")
+
+        with caplog.at_level("INFO"):
+            await queue_consumers._written_by(RecordingWriter(), BUCKET)([written])
+
+        assert "trace id t-7" in caplog.text
