@@ -58,7 +58,7 @@ def test_lifespan(mocker):
     index_builds = mocker.patch("app.index.builds.get_index_build_service")
     mocker.patch("app.common.s3.get_s3_client", return_value=mocker.sentinel.s3)
     mocker.patch("app.common.sqs.get_sqs_client", return_value=mocker.sentinel.sqs)
-    mocker.patch(
+    indexing_queue = mocker.patch(
         "app.entrypoints.queue_consumers.indexing_queue",
         return_value=mocker.MagicMock(),
     )
@@ -90,6 +90,9 @@ def test_lifespan(mocker):
             config.search_index_directory,
             index_builds.return_value,
             config.index_refresh_interval_seconds,
+        )
+        indexing_queue.assert_called_once_with(
+            config, mocker.sentinel.sqs, mocker.sentinel.s3, index_builds.return_value
         )
 
     assert stopped.is_set()
