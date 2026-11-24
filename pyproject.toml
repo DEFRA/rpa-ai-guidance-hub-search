@@ -16,7 +16,6 @@ dependencies = [
     "httpx2==2.16.2",
     "multidict==7.2.1",
     "opentelemetry-api==1.45.2",
-    "pydantic-ai-slim[bedrock]==2.68.0",
     "pydantic-settings==2.16.3",
     "pymongo[aws,encryption,snappy,zstd]==4.20.0",
     "rapidfuzz==3.14.6",

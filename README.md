@@ -53,19 +53,6 @@ In CDP, environment variables and secrets need to be set using CDP conventions. 
 
 For local development - see [instructions below](#local-development).
 
-#### Bedrock Configuration
-
-The application uses AWS Bedrock for LLM access. The following environment variables are required:
-
-| Variable | Description | Example |
-| --- | --- | --- |
-| `AWS_REGION` | AWS region for Bedrock service | `eu-west-2` |
-| `AWS_ACCESS_KEY_ID` | AWS access key ID | Set via CDP secrets |
-| `AWS_SECRET_ACCESS_KEY` | AWS secret access key | Set via CDP secrets |
-| `CLAUDE_SONNET_MODEL_CONFIG` | Bedrock model configuration | `anthropic.claude-sonnet-4-6,arn:aws:bedrock:eu-west-2:123456789012:application-inference-profile/fake-profile-test` |
-
-The `CLAUDE_SONNET_MODEL_CONFIG` format is: `model_id,inference_profile[,guardrail_id:guardrail_version]`
-
 #### Ingestion Configuration
 
 | Variable | Description | Default |

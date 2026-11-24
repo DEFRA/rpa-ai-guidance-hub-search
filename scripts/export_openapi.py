@@ -4,8 +4,8 @@
     uv run task openapi          # regenerate docs/openapi.json
     uv run task openapi-check    # exit 1 if the committed file is out of date
 
-The document is built from the FastAPI app without starting it, so no Mongo, S3 or
-Bedrock is involved. The app is built in ``http`` ingestion mode, so the document
+The document is built from the FastAPI app without starting it, so no Mongo or S3 is
+involved. The app is built in ``http`` ingestion mode, so the document
 always includes the ingestion routes. Its config is ``AppConfig``'s defaults, built
 without validation: the document depends on no config value, so none of the required
 environment variables need to be set.
