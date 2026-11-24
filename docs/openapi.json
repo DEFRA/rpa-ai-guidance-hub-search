@@ -243,6 +243,7 @@
           },
           "guideTitle": {
             "minLength": 1,
+            "pattern": "\\S",
             "title": "Guidetitle",
             "type": "string"
           },
@@ -319,6 +320,7 @@
         "description": "Index this published version, whose content is at `contentUrl`.",
         "properties": {
           "contentUrl": {
+            "pattern": "^s3://[^/?#]+/+[^/?#]",
             "title": "Contenturl",
             "type": "string"
           },
