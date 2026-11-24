@@ -7,23 +7,6 @@ import pytest
 
 from app import config
 
-VALID_PROFILE = (
-    "arn:aws:bedrock:eu-west-2:123456789012:application-inference-profile/test-profile"
-)
-VALID_MODEL = "anthropic.claude-sonnet-4-6"
-
-# One id per branch of the BedrockGuardrailConfig.id pattern, including the
-# colon-bearing forms the pattern permits.
-GUARDRAIL_IDS = [
-    "",
-    "pii-filter",
-    "pii.filter-2",
-    "foo:bar",
-    "a:b:c:d",
-    "arn:aws:bedrock:eu-west-2:123456789012:guardrail/pii",
-    "arn:aws-cn:bedrock:cn-north-1:123456789012:guardrail/pii",
-]
-
 
 @pytest.fixture
 def unset_config_singleton():
@@ -34,120 +17,11 @@ def unset_config_singleton():
     config._config = original
 
 
-class TestParseBedrockModelConfig:
-    """The packed 'model_id,inference_profile[,guardrail_id:version]' string."""
-
-    def test_parses_model_id_and_inference_profile(self):
-        parsed = config._parse_bedrock_model_config(f"{VALID_MODEL},{VALID_PROFILE}")
-
-        assert parsed.model_id == VALID_MODEL
-        assert parsed.inference_profile == VALID_PROFILE
-        assert parsed.guardrails is None
-
-    def test_strips_whitespace_around_each_part(self):
-        parsed = config._parse_bedrock_model_config(
-            f"  {VALID_MODEL} , {VALID_PROFILE}  "
-        )
-
-        assert parsed.model_id == VALID_MODEL
-        assert parsed.inference_profile == VALID_PROFILE
-
-    @pytest.mark.parametrize("guardrail_id", GUARDRAIL_IDS)
-    @pytest.mark.parametrize("guardrail_version", ["1", "12345678", "DRAFT"])
-    def test_round_trips_every_id_the_model_accepts(
-        self, guardrail_id, guardrail_version
-    ):
-        """The parser must not be stricter than BedrockGuardrailConfig itself.
-
-        An id may contain colons - both the short-id character class and the ARN
-        form permit them - while a version never can, so the packed value has to
-        split on the last colon rather than the first.
-        """
-        config.BedrockGuardrailConfig(id=guardrail_id, version=guardrail_version)
-
-        parsed = config._parse_bedrock_model_config(
-            f"{VALID_MODEL},{VALID_PROFILE},{guardrail_id}:{guardrail_version}"
-        )
-
-        assert parsed.guardrails is not None
-        assert parsed.guardrails.id == guardrail_id
-        assert parsed.guardrails.version == guardrail_version
-
-    def test_rejects_non_string_input(self):
-        with pytest.raises(ValueError, match="must be a string"):
-            config._parse_bedrock_model_config(1234)
-
-    @pytest.mark.parametrize("value", ["", "only-a-model-id"])
-    def test_rejects_fewer_than_two_parts(self, value):
-        with pytest.raises(ValueError, match="at least model_id and inference_profile"):
-            config._parse_bedrock_model_config(value)
-
-    def test_wraps_model_validation_failure(self):
-        # Underscores fall outside the inference-profile pattern.
-        with pytest.raises(ValueError, match="invalid Bedrock model config"):
-            config._parse_bedrock_model_config(f"{VALID_MODEL},bad_profile")
-
-    def test_rejects_invalid_guardrail_version(self):
-        with pytest.raises(pydantic.ValidationError):
-            config._parse_bedrock_model_config(
-                f"{VALID_MODEL},{VALID_PROFILE},my-guardrail:not-a-version"
-            )
-
-    def test_rejects_guardrail_without_a_version(self):
-        with pytest.raises(ValueError, match="guardrail_id:guardrail_version"):
-            config._parse_bedrock_model_config(
-                f"{VALID_MODEL},{VALID_PROFILE},no-colon-here"
-            )
-
-
-class TestParseReferenceOptions:
-    """The packed 'value1:Label One,value2:Label Two' string."""
-
-    def test_parses_an_ordered_list_of_value_label_pairs(self):
-        parsed = config._parse_reference_options(
-            "basic-payment-scheme:Basic Payment Scheme,not-specific:Not scheme-specific"
-        )
-
-        assert parsed == [
-            {"value": "basic-payment-scheme", "label": "Basic Payment Scheme"},
-            {"value": "not-specific", "label": "Not scheme-specific"},
-        ]
-
-    def test_strips_whitespace_around_each_part(self):
-        parsed = config._parse_reference_options("  siti-agri : Siti Agri  ")
-
-        assert parsed == [{"value": "siti-agri", "label": "Siti Agri"}]
-
-    def test_rejects_non_string_input(self):
-        with pytest.raises(ValueError, match="must be a string"):
-            config._parse_reference_options(1234)
-
-    def test_rejects_an_empty_string(self):
-        with pytest.raises(ValueError, match="at least one entry"):
-            config._parse_reference_options("")
-
-    def test_rejects_an_entry_missing_its_colon(self):
-        with pytest.raises(ValueError, match="expected 'value:label'"):
-            config._parse_reference_options("no-colon-here")
-
-    @pytest.mark.parametrize("entry", [":Label With No Value", "value-with-no-label:"])
-    def test_rejects_an_entry_with_an_empty_value_or_label(self, entry):
-        with pytest.raises(ValueError, match="expected 'value:label'"):
-            config._parse_reference_options(entry)
-
-    def test_one_malformed_entry_fails_the_whole_value(self):
-        """Fail-fast, not partial recovery - a bad entry never silently vanishes."""
-        with pytest.raises(ValueError, match="expected 'value:label'"):
-            config._parse_reference_options("siti-agri:Siti Agri,no-colon-here,crm:CRM")
-
-
 class TestAppConfig:
-    """Field defaults and the derived Bedrock configuration."""
+    """Field defaults and validation."""
 
     def test_defaults(self):
-        cfg = config.AppConfig(
-            CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
-        )
+        cfg = config.AppConfig()
 
         assert cfg.host == "127.0.0.1"
         assert cfg.port == 8085
@@ -168,16 +42,12 @@ class TestAppConfig:
         )
 
         with pytest.raises(pydantic.ValidationError, match="FIFO"):
-            config.AppConfig(
-                CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
-            )
+            config.AppConfig()
 
     def test_reads_the_ingestion_mode_from_the_environment(self, monkeypatch):
         monkeypatch.setenv("INGESTION_MODE", "s3")
 
-        cfg = config.AppConfig(
-            CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
-        )
+        cfg = config.AppConfig()
 
         assert cfg.ingestion_mode is config.IngestionMode.S3
 
@@ -185,23 +55,17 @@ class TestAppConfig:
         monkeypatch.setenv("INGESTION_MODE", "sqs")
 
         with pytest.raises(pydantic.ValidationError, match="ingestion_mode"):
-            config.AppConfig(
-                CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
-            )
+            config.AppConfig()
 
     def test_refreshes_the_index_every_minute_by_default(self):
-        cfg = config.AppConfig(
-            CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
-        )
+        cfg = config.AppConfig()
 
         assert cfg.index_refresh_interval_seconds == 60
 
     def test_reads_the_index_refresh_interval_from_the_environment(self, monkeypatch):
         monkeypatch.setenv("INDEX_REFRESH_INTERVAL_SECONDS", "5")
 
-        cfg = config.AppConfig(
-            CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
-        )
+        cfg = config.AppConfig()
 
         assert cfg.index_refresh_interval_seconds == 5
 
@@ -211,24 +75,7 @@ class TestAppConfig:
         with pytest.raises(
             pydantic.ValidationError, match="index_refresh_interval_seconds"
         ):
-            config.AppConfig(
-                CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
-            )
-
-    def test_validator_parses_the_packed_model_config(self):
-        cfg = config.AppConfig(
-            CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
-        )
-
-        assert cfg.claude_sonnet_model_config.model_id == VALID_MODEL
-
-    def test_bedrock_exposes_the_claude_sonnet_model(self):
-        cfg = config.AppConfig(
-            CLAUDE_SONNET_MODEL_CONFIG=f"{VALID_MODEL},{VALID_PROFILE}",
-        )
-
-        assert cfg.bedrock.claude_sonnet.model_id == VALID_MODEL
-        assert cfg.bedrock.claude_sonnet.inference_profile == VALID_PROFILE
+            config.AppConfig()
 
 
 @pytest.mark.usefixtures("unset_config_singleton")
@@ -249,19 +96,17 @@ class TestGetConfig:
         assert config.get_config() is cached
         constructor.assert_not_called()
 
-    def test_raises_runtime_error_naming_the_offending_variable(self, monkeypatch):
-        monkeypatch.delenv("CLAUDE_SONNET_MODEL_CONFIG", raising=False)
+    def test_raises_runtime_error_naming_the_offending_field(self, monkeypatch):
+        monkeypatch.delenv("SEARCH_INDEXING_SQS_QUEUE_URL", raising=False)
 
         with pytest.raises(RuntimeError, match="Config validation failed") as exc_info:
             config.get_config()
 
-        # The validation alias is reported, so the message names the env var an
-        # operator has to set rather than the internal field name.
-        assert "CLAUDE_SONNET_MODEL_CONFIG" in str(exc_info.value)
+        assert "search_indexing_sqs_queue_url" in str(exc_info.value)
         assert "Field required" in str(exc_info.value)
 
     def test_logs_the_validation_failure(self, monkeypatch, caplog):
-        monkeypatch.delenv("CLAUDE_SONNET_MODEL_CONFIG", raising=False)
+        monkeypatch.delenv("SEARCH_INDEXING_SQS_QUEUE_URL", raising=False)
 
         with (
             caplog.at_level(logging.ERROR, logger="app.config"),
@@ -272,7 +117,7 @@ class TestGetConfig:
         assert "Config validation failed" in caplog.text
 
     def test_does_not_cache_a_failed_construction(self, monkeypatch):
-        monkeypatch.delenv("CLAUDE_SONNET_MODEL_CONFIG", raising=False)
+        monkeypatch.delenv("SEARCH_INDEXING_SQS_QUEUE_URL", raising=False)
 
         with pytest.raises(RuntimeError):
             config.get_config()
