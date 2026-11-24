@@ -1,18 +1,18 @@
 """A shared SQS client, built like the S3 client."""
 
-from logging import getLogger
+import logging
 from typing import TYPE_CHECKING, Annotated
 
 import boto3
 import fastapi
-from botocore.config import Config
+from botocore import config as botocore_config
 
 from app import config as app_config
 
 if TYPE_CHECKING:
     from types_boto3_sqs import SQSClient
 
-logger = getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 CONNECT_TIMEOUT_SECONDS = 2.5
 READ_TIMEOUT_SECONDS = 25
@@ -37,7 +37,7 @@ def get_sqs_client(config: app_config.Config) -> SQSClient:
             "sqs",
             endpoint_url=config.floci_endpoint_url,
             region_name=config.aws_region,
-            config=Config(
+            config=botocore_config.Config(
                 connect_timeout=CONNECT_TIMEOUT_SECONDS,
                 read_timeout=READ_TIMEOUT_SECONDS,
                 retries={"total_max_attempts": ATTEMPTS, "mode": "standard"},

@@ -1,5 +1,8 @@
 """The preparation worker prepares published guide versions and dispatches every job."""
 
+import asyncio
+import uuid
+
 import boto3
 import moto
 import pytest
@@ -9,11 +12,14 @@ from app.common import cloudevents
 from app.indexing import jobs
 from app.indexing.prepare import document_preparer, packed_chunking
 from app.ingestion import preparation
+from app.records import ids
 from tests.fakes import chunk_set_store as fake_chunk_set_store
 from tests.fakes import section_store as fake_section_store
 from tests.support import events, guides
 
 BUCKET = guides.BUCKET
+
+OTHER_VERSION_ID = ids.VersionId(uuid.UUID("0199b8a2-0000-7000-8000-00000000f009"))
 
 
 class RecordingDispatcher:
@@ -177,6 +183,73 @@ class TestDeleted:
 
         assert await sections.get(guides.DOCUMENT_ID, guides.VERSION_ID) is not None
         assert await staged.get(apply_job.chunk_set_key) is not None
+
+
+class TestSameVersion:
+    """Events for one version take turns, so a deletion can't be undone by files."""
+
+    async def test_a_deletion_waits_for_the_versions_preparation(
+        self, worker, s3_client, stores, dispatcher
+    ):
+        _upload(s3_client)
+        sections, staged = stores
+        released = asyncio.Event()
+        prepare = sections.put
+
+        async def held_put(*args, **kwargs):
+            await released.wait()
+            return await prepare(*args, **kwargs)
+
+        sections.put = held_put
+        publishing = asyncio.create_task(worker.handle(events.published()))
+        await asyncio.sleep(0)
+        deleting = asyncio.create_task(worker.handle(events.deleted()))
+        for _ in range(5):
+            await asyncio.sleep(0)
+
+        assert dispatcher.jobs == []
+
+        released.set()
+        await asyncio.gather(publishing, deleting)
+
+        apply_job, remove_job = dispatcher.jobs
+        assert isinstance(apply_job, jobs.ApplyJob)
+        assert remove_job == events.deleted().to_job()
+        assert await sections.get(guides.DOCUMENT_ID, guides.VERSION_ID) is None
+        assert await staged.get(apply_job.chunk_set_key) is None
+
+    async def test_other_versions_do_not_wait(self, worker, dispatcher):
+        released = asyncio.Event()
+        other = events.deleted(version_id=OTHER_VERSION_ID)
+        record = dispatcher.dispatch
+
+        async def held(job):
+            if job.version_id == guides.VERSION_ID:
+                await released.wait()
+            await record(job)
+
+        dispatcher.dispatch = held
+        deleting = asyncio.create_task(worker.handle(events.deleted()))
+        await asyncio.sleep(0)
+
+        await asyncio.wait_for(worker.handle(other), 1)
+        released.set()
+        await deleting
+
+        assert [job.version_id for job in dispatcher.jobs] == [
+            other.version_id,
+            guides.VERSION_ID,
+        ]
+
+
+class TestVersionLocks:
+    async def test_forgets_a_version_once_nothing_holds_it(self):
+        locks = preparation.VersionLocks()
+
+        async with locks.hold(guides.DOCUMENT_ID, guides.VERSION_ID):
+            assert len(locks) == 1
+
+        assert len(locks) == 0
 
 
 class TestUnknown:

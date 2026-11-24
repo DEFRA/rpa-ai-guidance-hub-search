@@ -33,13 +33,11 @@ jobs:
       - name: Check openapi.json is up to date
         run: uv run task openapi-check
 
-      - name: Check the asyncapi documents are up to date
+      - name: Check asyncapi.yaml is up to date
         run: uv run task asyncapi-check
 
-      - name: Validate the asyncapi documents against the AsyncAPI spec
-        run: |
-          npx --yes @asyncapi/cli@6.3.0 validate docs/asyncapi.json
-          npx --yes @asyncapi/cli@6.3.0 validate docs/asyncapi.yaml
+      - name: Validate asyncapi.yaml against the AsyncAPI spec
+        run: npx --yes @asyncapi/cli@6.3.0 validate docs/asyncapi.yaml
 
       # Dependabot-triggered runs cannot read Actions secrets (only Dependabot
       # secrets), so SONAR_TOKEN is empty and the scan would fail.

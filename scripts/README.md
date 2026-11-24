@@ -13,7 +13,7 @@
   (`uv run task index-document --source-type guide --document-id … --version-id … --status published
   --content-url s3://…/content.md`; reads `.env`, so copy `.env.example` first.)
 - `export_asyncapi.py` — write the queues' AsyncAPI document to
-  `docs/asyncapi.json` and `docs/asyncapi.yaml` (`uv run task asyncapi`), or with `--check` fail if the
+  `docs/asyncapi.yaml` (`uv run task asyncapi`), or with `--check` fail if the
   committed file is stale (`uv run task asyncapi-check`, run by the
   pull-request workflow, which also validates it with the AsyncAPI CLI).
 - `send_document.py` — local development only. Sends one version to a running

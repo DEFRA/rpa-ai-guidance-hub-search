@@ -381,7 +381,7 @@ Failures are logged and counted (`IngestionFailed`, with `ENABLE_METRICS`).
 Every message on either queue is a [CloudEvents 1.0](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/spec.md)
 event in structured JSON mode: the whole event is the message body. All of them
 subclass the one CloudEvents base in `app/common/cloudevents.py`. The contract is
-the AsyncAPI 3.0 document ([JSON](docs/asyncapi.json), [YAML](docs/asyncapi.yaml)): both queues,
+the AsyncAPI 3.0 document [`docs/asyncapi.yaml`](docs/asyncapi.yaml): both queues,
 their SQS bindings, every message with an example, and their payload schemas,
 generated from the models (`uv run task asyncapi`). The pull-request workflow
 checks it is current and valid.

@@ -17,6 +17,7 @@ shutdown each waits up to `SQS_SHUTDOWN_TIMEOUT_SECONDS` for handlers in
 flight; uvicorn's graceful shutdown is given longer (`entrypoints.fastapi`).
 """
 
+import logging
 from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -36,6 +37,8 @@ from app.records import chunk_set_store, section_store
 if TYPE_CHECKING:
     from types_boto3_s3 import S3Client
     from types_boto3_sqs import SQSClient
+
+logger = logging.getLogger(__name__)
 
 FAILED_METRIC = "IngestionFailed"
 
@@ -104,13 +107,22 @@ def _traced[Event: cloudevents.CloudEvent](
 
 
 def hooks(config: app_config.AppConfig) -> consumer_hooks.Hooks:
-    """Counts each failed message, when metrics are on."""
+    """Counts each failed message, when metrics are on.
+
+    The consumer logs a failure itself only when no hook is installed, so the
+    hook logs it too.
+    """
     if not config.enable_metrics:
         return consumer_hooks.Hooks()
 
     async def count_failure(
-        _error: Exception, failed: Sequence[message.Message[Any]]
+        error: Exception, failed: Sequence[message.Message[Any]]
     ) -> None:
+        logger.error(
+            "sqs handler failed for %s",
+            ", ".join(item.message_id for item in failed),
+            exc_info=error,
+        )
         metrics.counter(FAILED_METRIC, len(failed))
 
     return consumer_hooks.Hooks(on_processing_error=count_failure)
