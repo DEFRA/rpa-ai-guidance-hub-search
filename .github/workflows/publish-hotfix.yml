@@ -34,12 +34,12 @@ jobs:
           uv run task test
 
       - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@e805d875275f728fac1885b413934be6d7c63f65 # 8.4.1
+        uses: SonarSource/sonarqube-scan-action@59202af334b4ba7b5db01b701b8e79f8b3bef0f4 # 8.5.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
       - name: Publish Hot Fix
-        uses: DEFRA/cdp-build-action/build-hotfix@5e3632e25c7d4c3d514da45acaa149fd4c193640
+        uses: DEFRA/cdp-build-action/build-hotfix@e48f64a5c90fe53773bce0bd5d8195fbd19aae95
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
