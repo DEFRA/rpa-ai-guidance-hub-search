@@ -12,10 +12,8 @@ This is work-in-progress. See [To Do List](./TODO.md)
     - [Development](#development)
     - [Testing](#testing)
     - [Production Mode](#production-mode)
-  - [Where code goes](#where-code-goes)
-    - [Schemas and models](#schemas-and-models)
-    - [Ids](#ids)
   - [API endpoints](#api-endpoints)
+  - [The indexing queue's events](#the-indexing-queues-events)
   - [Custom Cloudwatch Metrics](#custom-cloudwatch-metrics)
   - [Pipelines](#pipelines)
     - [Dependabot](#dependabot)
@@ -76,6 +74,10 @@ The `CLAUDE_SONNET_MODEL_CONFIG` format is: `model_id,inference_profile[,guardra
 | `INDEX_REFRESH_INTERVAL_SECONDS` | How often each replica checks MongoDB for a newer active index build and swaps it in. | `60` |
 | `MAX_INLINE_CONTENT_BYTES` | The largest inline `content.markdown` an index request may carry; larger is refused with 413, and should be sent as `contentUrl` | `2097152` (2 MiB) |
 | `SEARCH_STORE_S3_BUCKET` | Where sections, staged chunk sets and index builds are kept | `rpa-ai-guidance-hub-search-store` |
+| `MANAGED_DOCS_S3_BUCKET` | The only bucket a version's `contentUrl` may name; the API writes each version's `content.md` there. | `rpa-ai-guidance-hub-managed-docs` |
+| `SEARCH_INDEXING_SQS_QUEUE_URL` | The indexing queue: guide events to prepare (see [The indexing queue's events](#the-indexing-queues-events)). Standard. | required |
+| `SEARCH_INDEX_SYNC_SQS_QUEUE_URL` | The index sync queue: jobs for the index's single writer. Must be FIFO. | required |
+| `SQS_SHUTDOWN_TIMEOUT_SECONDS` | How long the queue consumers wait for messages in flight on shutdown. | `20` |
 
 ### Linting and Formatting
 
@@ -232,97 +234,6 @@ To test the application run:
 uv run pytest
 ```
 
-## Where code goes
-
-### Domains
-
-```text
-prepare:  source reader -> SourceDocument -> sectioning -> SectionRecord (stored)
-                                                               |
-                         chunking strategy -> ChunkSet (staged) -> ApplyJob
-apply:    ApplyJob -> staged ChunkSet -> index build (published)
-
-indexing (write)   search (read)  ->  search/v1 (GET /v1/search)
-        \              /
-     records, index, matching
-```
-
-- **`app/records/`** is the canonical, source-neutral model: a
-  `DocumentHeader` per version (with the `url` a reader views it at, and
-  `source`, the source's own details typed per source type in
-  `source_metadata`: `GuideMetadata` today),
-  `SectionRecord`s (whole sections, kept as blocks, with a section
-  `content_hash`) and the `ChunkRecord`s a strategy derives from them. Sections
-  are stored as `sections/{documentId}/{versionId}.jsonl`, and are what every
-  rebuild starts from. A `ChunkSet` is one strategy's chunks of one version at
-  one status, staged as `staged/{strategy}/{documentId}/{versionId}/{status}.jsonl`
-  for the apply step.
-- **Ids**: every document and version id is a UUID. Guides use the CMS's
-  (always UUIDv7). A source without its own, such as GOV.UK content, mints
-  deterministic UUIDv5s under its own namespace (`ids.minted_id`), so the
-  same content always gets the same ids and sources never collide.
-- **`app/indexing/`** indexes a version in two steps (`stages.py`), so that
-  preparing can later scale out while a single writer applies:
-  - **`prepare/`** turns an `IndexJob` into an `ApplyJob`. A `SourceReader` per
-    source type reads one version into a `SourceDocument` (a guide's
-    `content.md` today, with `guide_cms` modelling the CMS API's guide and
-    its metadata; GOV.UK content items would be another reader with their
-    own Content API models and metadata type), `sectioning`
-    makes the canonical sections, and a named `ChunkingStrategy` (`packed-800-v2`
-    for the keyword index) chunks them. `DocumentPreparer` stores the sections
-    and stages the chunk set. It never touches the index.
-  - **`apply/`** writes an `ApplyJob`'s staged chunk set to the index.
-    `DocumentApplier` refuses chunks from any strategy but
-    `index_schema.CHUNK_STRATEGY`, and `publish` applies a job to the active
-    build and publishes the result. It never reads a source or chunks.
-- **`app/search/`** answers queries from the index. `app/search/v1/` is the HTTP
-  contract; a breaking change is a new `v2/` beside it.
-- **`app/index/`** is the index itself: its fields and `SCHEMA_VERSION`, the
-  `ChunkIndex` protocols, the Tantivy engine, and its builds in S3 and the
-  active build in MongoDB, both keyed by schema version. Each replica checks
-  the active build every `INDEX_REFRESH_INTERVAL_SECONDS` (default 60) and
-  swaps in a newer one.
-- **`app/matching/`** decides what counts as a match, for the engine and for
-  excerpts alike.
-
-Indexing and search never import each other.
-
-### Schemas and models
-
-Each layer knows only the one directly below it:
-
-```text
-HTTP JSON  <-  schemas.py   Pydantic: from_model() and conversions to models
-                   |
-               models.py    dataclasses and enums: to_document() / from_document()
-                   |
-               Mongo record (a dict)
-```
-
-- **`schemas.py`** holds the shapes that cross the HTTP boundary: request bodies,
-  response bodies, and payloads other services send us (such as cdp-uploader's
-  callback). They are Pydantic, which validates them, writes them into the OpenAPI
-  document and spells them in camelCase on the wire. A schema converts to and from
-  models, and knows nothing of how anything is stored.
-- **`models.py`** holds what the service works with: plain dataclasses and enums,
-  with no HTTP in them. A model converts itself to and from the record Mongo stores
-  (`to_document()` and `from_document()`), so the stored field names are written
-  down once. A model never imports a schema.
-- **Routers** only call the conversions; they don't build shapes themselves.
-- The role decides the file, not the library: `AppConfig` is Pydantic and lives in
-  `config.py`.
-
-### Ids
-
-`app/records/ids.py` gives each kind of id a type of its own (`typing.NewType`), so
-mypy refuses one where another belongs:
-
-- **`DocumentId` and `VersionId`** are uuids. A guide's are the CMS's, always
-  version 7 (time-ordered), and refused otherwise: a path id that isn't one is
-  answered with 422. A source without ids of its own mints them (`minted_id`).
-- **`SectionId` and `ChunkId`** are `str`, hashed from what they identify unless
-  the source supplies its own.
-
 ## API endpoints
 
 | Endpoint                        | Description                    |
@@ -343,6 +254,23 @@ turns. A job that fails before writing fails alone; a failed write fails its
 whole batch, which publishes nothing. A failure is logged and counted
 (`IngestionFailed`, with `ENABLE_METRICS`), not retried: resending the same request
 is always safe.
+
+## The indexing queue's events
+
+The indexing queue carries guide events as [CloudEvents 1.0](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/spec.md)
+JSON. The contract is [`docs/asyncapi.json`](docs/asyncapi.json), generated from
+`app/ingestion/models.py` with `uv run task asyncapi`.
+
+| `type` | `data` |
+| --- | --- |
+| `uk.gov.defra.rpa.guidancehub.guide.version.published` | `documentId`, `versionId`, `sourceType`, `status`, `contentUrl`, `versionNumber`, `metadata` |
+| `uk.gov.defra.rpa.guidancehub.guide.version.deleted` | `documentId`, `versionId` |
+
+- `dataschema` names the version of `data`
+  (`urn:defra:rpa-ai-guidance-hub:events:guide-version-published:v1`). A breaking
+  change is a new version (`…:v2`); within a version, changes are additive.
+- An event of an unknown type is ignored. One that doesn't validate, or is in a
+  version the service doesn't read, is dead-lettered.
 
 ## Custom Cloudwatch Metrics
 

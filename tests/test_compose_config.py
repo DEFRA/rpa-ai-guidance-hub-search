@@ -12,12 +12,15 @@ the app has a config field to read them into.
 
 import pathlib
 
+import pytest
 import yaml
 
 from app import config
 
 SERVICE = "rpa-ai-guidance-hub-search"
-COMPOSE_FILE = pathlib.Path(__file__).parent.parent / "compose.yml"
+ROOT = pathlib.Path(__file__).parent.parent
+COMPOSE_FILE = ROOT / "compose.yml"
+ENV_EXAMPLE = ROOT / ".env.example"
 
 
 def service_environment():
@@ -52,6 +55,29 @@ def test_mongo_uri_is_pinned_to_the_mongodb_service():
     assert mongo_uri is not None
     assert "localhost" not in mongo_uri
     assert "mongodb" in mongo_uri
+
+
+def _queue_url_variables():
+    names = (line.partition("=")[0] for line in ENV_EXAMPLE.read_text().splitlines())
+
+    return sorted(name for name in names if name.endswith("_QUEUE_URL"))
+
+
+def test_the_env_example_has_queue_urls_to_check():
+    assert _queue_url_variables(), f"no *_QUEUE_URL variables in {ENV_EXAMPLE.name}"
+
+
+@pytest.mark.parametrize("name", _queue_url_variables())
+def test_queue_urls_are_pinned_to_the_floci_service(name):
+    """Each queue URL in .env addresses localhost, so the container needs its own."""
+    queue_url = service_environment().get(name)
+
+    assert queue_url is not None, (
+        f"compose.yml does not set {name} for the service, so the host-oriented "
+        "value in .env reaches the container unchanged"
+    )
+    assert "localhost" not in queue_url
+    assert queue_url.startswith("http://floci:4566/")
 
 
 def test_every_bucket_variable_is_read_by_the_app():

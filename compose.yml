@@ -57,6 +57,8 @@ services:
       # Not ${FLOCI_ENDPOINT_URL:-...}: compose interpolates that from ./.env,
       # which holds the host-side value and would win over the default.
       FLOCI_ENDPOINT_URL: http://floci:4566
+      SEARCH_INDEXING_SQS_QUEUE_URL: http://floci:4566/000000000000/rpa_ai_guidance_hub_search_indexing
+      SEARCH_INDEX_SYNC_SQS_QUEUE_URL: http://floci:4566/000000000000/rpa_ai_guidance_hub_search_index_sync.fifo
       MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017/}
       HOST: ${HOST:-0.0.0.0}
       INGESTION_MODE: ${INGESTION_MODE:-http}

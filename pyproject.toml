@@ -29,6 +29,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "debugpy==1.8.22",
+    "jsonschema==4.26.0",
     "moto[s3,sqs]==5.2.5",
     "mypy==2.4.1",
     "pre-commit==4.7.0",
@@ -42,6 +43,7 @@ dev = [
     "testcontainers==4.15.0",
     "types-aiofiles==25.1.0.20261107",
     "types-boto3[s3,sqs]==1.44.3",
+    "types-pyyaml==6.0.12.20261113",
 ]
 
 [project.scripts]
@@ -67,10 +69,12 @@ output = "coverage/coverage.xml"
 
 [tool.taskipy.tasks]
 format = "uv run ruff format . && uv run ruff check . --fix"
-lint = "uv run ruff format ./app ./tests --check && uv run ruff check ./app ./tests"
-typecheck = "uv run mypy ./app ./tests"
+lint = "uv run ruff format ./app ./scripts ./tests --check && uv run ruff check ./app ./scripts ./tests"
+typecheck = "uv run mypy ./app ./scripts ./tests"
 openapi = "uv run python -m scripts.export_openapi"
 openapi-check = "uv run python -m scripts.export_openapi --check"
+asyncapi = "uv run python -m scripts.export_asyncapi"
+asyncapi-check = "uv run python -m scripts.export_asyncapi --check"
 index-document = "uv run --env-file .env python -m scripts.index_document"
 send-document = "uv run python -m scripts.send_document"
 test = "uv run task lint && uv run task typecheck && uv run coverage run -m pytest -vv && uv run coverage html && uv run coverage xml"
