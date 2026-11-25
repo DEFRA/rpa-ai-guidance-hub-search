@@ -2,23 +2,18 @@
 
 import datetime as dt
 import enum
-from typing import TYPE_CHECKING, Annotated, Literal, Self
+from typing import Any, Literal, Self
 
 import pydantic
 from pydantic import alias_generators
 
-from app.indexing import jobs
-from app.indexing.prepare import (
-    guide_cms,
-    guide_content,
-    guide_markdown,
-    guide_source,
-    sources,
-)
-from app.records import ids, models
+from app.indexing.prepare import guide_cms
+from app.ingestion import models
+from app.records import ids
+from app.records import models as record_models
 
-if TYPE_CHECKING:
-    import types_boto3_s3
+INLINE_CONTENT_REFUSED = "inline content is no longer accepted; send contentUrl"
+TITLE_MISSING = "send title, or metadata.guideTitle"
 
 
 class _CamelModel(pydantic.BaseModel):
@@ -29,92 +24,66 @@ class _CamelModel(pydantic.BaseModel):
     )
 
 
-class InlineContent(_CamelModel):
-    """The version's `content.md`."""
-
-    markdown: str = pydantic.Field(min_length=1)
-
-
-Title = Annotated[str, pydantic.StringConstraints(strip_whitespace=True, min_length=1)]
-
-
 class IndexMetadata(guide_cms.CmsGuideMetadata):
     """The CMS's metadata. `guideTitle` is the title when `title` isn't sent."""
 
-    guide_title: Title | None = None
+    guide_title: models.Title | None = None
 
 
 class IndexRequest(_CamelModel):
-    """Index this published version. Exactly one of `contentUrl` or `content`.
+    """Index this published version, whose content is at `contentUrl`."""
 
-    Only `published` is accepted: the index holds one version per document, so
-    a version awaiting publication would replace the one readers can see.
-    """
-
-    source_type: models.SourceType
-    status: Literal[models.DocumentStatus.PUBLISHED]
+    source_type: Literal[record_models.SourceType.GUIDE]
+    status: Literal[record_models.DocumentStatus.PUBLISHED]
     occurred_at: pydantic.AwareDatetime
-    content_url: str | None = None
-    content: InlineContent | None = None
-    title: Title | None = None
+    content_url: models.S3Url
+    title: models.Title | None = None
     version_number: str | None = None
     metadata: IndexMetadata
 
-    @pydantic.model_validator(mode="after")
-    def _one_source_of_content(self) -> Self:
-        if (self.content_url is None) == (self.content is None):
-            msg = "send exactly one of contentUrl or content"
-            raise ValueError(msg)
+    @pydantic.model_validator(mode="before")
+    @classmethod
+    def _no_inline_content(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "content" in data:
+            raise ValueError(INLINE_CONTENT_REFUSED)
 
-        if self.content_url is not None:
-            guide_content.parse_s3_url(self.content_url)
-
-        return self
+        return data
 
     @pydantic.model_validator(mode="after")
     def _a_title(self) -> Self:
         if self.title is None and self.metadata.guide_title is None:
-            msg = "send title, or metadata.guideTitle"
-            raise ValueError(msg)
+            raise ValueError(TITLE_MISSING)
 
         return self
 
-    def inline_bytes(self) -> int:
-        """The size of the inline Markdown; 0 when the content is referenced."""
-        return len(self.content.markdown.encode()) if self.content else 0
+    @property
+    def indexed_title(self) -> str:
+        """`title`, else `metadata.guideTitle`, which the hub API sends until it
+        sends `title`."""
+        title = self.title or self.metadata.guide_title
 
-    def to_job(
+        if title is None:
+            raise ValueError(TITLE_MISSING)
+
+        return title
+
+    def to_event(
         self,
         document_id: ids.DocumentId,
         version_id: ids.VersionId,
-    ) -> jobs.IndexJob:
-        """Inline content has no address; its `content_url` only records whence."""
-        return jobs.IndexJob(
-            source_type=self.source_type,
+        trace_id: str | None,
+    ) -> models.GuideVersionPublishedV1:
+        data = models.GuideVersionPublishedDataV1(
             document_id=document_id,
             version_id=version_id,
+            source_type=self.source_type,
             status=self.status,
-            content_url=self.content_url
-            or f"cms://documents/{document_id}/versions/{version_id}",
-            occurred_at=self.occurred_at,
+            content_url=self.content_url,
+            title=self.indexed_title,
+            version_number=self.version_number,
+            metadata=self.metadata,
         )
-
-    def to_reader(self, client: types_boto3_s3.S3Client) -> sources.SourceReader:
-        """Reads the inline content, or the referenced content from S3.
-
-        The title is `title`, else `metadata.guideTitle`, which the hub API sends
-        until it sends `title`.
-        """
-        parser = guide_markdown.GuideMarkdownParser()
-        metadata = guide_cms.version_metadata(self.metadata, self.version_number)
-        title = self.title or self.metadata.guide_title
-
-        content: guide_content.ContentSource = (
-            guide_content.S3ContentSource(client)
-            if self.content is None
-            else guide_content.InlineContent(self.content.markdown)
-        )
-        return guide_source.GuideSource(content, parser, metadata, title)
+        return models.guide_version_published(data, self.occurred_at, trace_id)
 
 
 class Operation(enum.StrEnum):
@@ -123,20 +92,20 @@ class Operation(enum.StrEnum):
 
 
 class Accepted(_CamelModel):
-    """The request was accepted; the work happens after this reply."""
+    """The request was accepted and queued; the work happens after this reply."""
 
     document_id: ids.DocumentId
     version_id: ids.VersionId
-    status: models.DocumentStatus | None
+    status: record_models.DocumentStatus | None
     operation: Operation
 
 
-def remove_job(
+def delete_event(
     document_id: ids.DocumentId,
     version_id: ids.VersionId,
-) -> jobs.RemoveJob:
-    return jobs.RemoveJob(
-        document_id=document_id,
-        version_id=version_id,
-        occurred_at=dt.datetime.now(dt.UTC),
+    trace_id: str | None,
+) -> models.GuideVersionDeletedV1:
+    data = models.GuideVersionDeletedDataV1(
+        document_id=document_id, version_id=version_id
     )
+    return models.guide_version_deleted(data, dt.datetime.now(dt.UTC), trace_id)

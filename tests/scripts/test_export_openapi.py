@@ -10,7 +10,7 @@ from scripts import export_openapi
 def no_config(monkeypatch):
     """No cached `AppConfig`, and a required variable missing."""
     monkeypatch.setattr(config, "_config", None)
-    monkeypatch.delenv("CLAUDE_SONNET_MODEL_CONFIG")
+    monkeypatch.delenv("SEARCH_INDEXING_SQS_QUEUE_URL")
 
 
 @pytest.mark.usefixtures("no_config")

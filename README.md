@@ -53,31 +53,17 @@ In CDP, environment variables and secrets need to be set using CDP conventions. 
 
 For local development - see [instructions below](#local-development).
 
-#### Bedrock Configuration
-
-The application uses AWS Bedrock for LLM access. The following environment variables are required:
-
-| Variable | Description | Example |
-| --- | --- | --- |
-| `AWS_REGION` | AWS region for Bedrock service | `eu-west-2` |
-| `AWS_ACCESS_KEY_ID` | AWS access key ID | Set via CDP secrets |
-| `AWS_SECRET_ACCESS_KEY` | AWS secret access key | Set via CDP secrets |
-| `CLAUDE_SONNET_MODEL_CONFIG` | Bedrock model configuration | `anthropic.claude-sonnet-4-6,arn:aws:bedrock:eu-west-2:123456789012:application-inference-profile/fake-profile-test` |
-
-The `CLAUDE_SONNET_MODEL_CONFIG` format is: `model_id,inference_profile[,guardrail_id:guardrail_version]`
-
 #### Ingestion Configuration
 
 | Variable | Description | Default |
 | --- | --- | --- |
-| `INGESTION_MODE` | `http` mounts the [ingestion routes](#api-endpoints) for the CMS to push document versions to; `s3` leaves them out. The `index-document` script works in both. | `http` |
+| `INGESTION_MODE` | `http` mounts the [ingestion routes](#api-endpoints) for the CMS to push document versions to; `s3` leaves them out. The queue consumers and the `index-document` script work in both. | `http` |
 | `INDEX_REFRESH_INTERVAL_SECONDS` | How often each replica checks MongoDB for a newer active index build and swaps it in. | `60` |
-| `MAX_INLINE_CONTENT_BYTES` | The largest inline `content.markdown` an index request may carry; larger is refused with 413, and should be sent as `contentUrl` | `2097152` (2 MiB) |
-| `SEARCH_STORE_S3_BUCKET` | Where sections, staged chunk sets and index builds are kept | `rpa-ai-guidance-hub-search-store` |
+| `SEARCH_INDEXING_SQS_QUEUE_URL` | The indexing queue: guide events to prepare (CloudEvents; see [Indexing](#indexing)). Standard. | required |
+| `SEARCH_INDEX_SYNC_SQS_QUEUE_URL` | The index sync queue: jobs for the index's single writer. Must be FIFO. Not used yet: the index is written in process (see [Indexing](#indexing)). | required |
+| `SQS_SHUTDOWN_TIMEOUT_SECONDS` | How long the queue consumers wait for messages in flight on shutdown; uvicorn waits 5 seconds longer. | `20` |
 | `MANAGED_DOCS_S3_BUCKET` | The only bucket a version's `contentUrl` may name; the API writes each version's `content.md` there. | `rpa-ai-guidance-hub-managed-docs` |
-| `SEARCH_INDEXING_SQS_QUEUE_URL` | The indexing queue: guide events to prepare (see [The indexing queue's events](#the-indexing-queues-events)). Standard. | required |
-| `SEARCH_INDEX_SYNC_SQS_QUEUE_URL` | The index sync queue: jobs for the index's single writer. Must be FIFO. | required |
-| `SQS_SHUTDOWN_TIMEOUT_SECONDS` | How long the queue consumers wait for messages in flight on shutdown. | `20` |
+| `SEARCH_STORE_S3_BUCKET` | Where sections, staged chunk sets and index builds are kept | `rpa-ai-guidance-hub-search-store` |
 
 ### Linting and Formatting
 
@@ -204,16 +190,16 @@ The service will then run on `http://localhost:8085`
 #### Sending it a document
 
 With the service running, send it a guide version the way the CMS will. The
-reply is `202`; the outcome is in the service's log.
+reply is `202` once the request is queued; the outcome is in the service's log.
+The content must already be in the managed-docs bucket.
 
 ```bash
-# inline content
-uv run task send-document --document-id <uuid7> --version-id <uuid7> \
-    --title "Claims Guidance" --content-file guide.md
-
 # content the API has stored in S3
+aws --endpoint-url http://localhost:4566 s3 cp guide.md \
+    s3://rpa-ai-guidance-hub-managed-docs/<doc>/<ver>/content.md
 uv run task send-document --document-id <uuid7> --version-id <uuid7> \
-    --title "Claims Guidance" --content-url s3://<bucket>/<doc>/<ver>/content.md
+    --title "Claims Guidance" \
+    --content-url s3://rpa-ai-guidance-hub-managed-docs/<doc>/<ver>/content.md
 
 # remove the version
 uv run task send-document --document-id <uuid7> --version-id <uuid7> --delete
@@ -234,6 +220,105 @@ To test the application run:
 uv run pytest
 ```
 
+## Where code goes
+
+### Domains
+
+```text
+prepare:  source reader -> SourceDocument -> sectioning -> SectionRecord (stored)
+                                                               |
+                         chunking strategy -> ChunkSet (staged) -> ApplyJob
+apply:    ApplyJob -> staged ChunkSet -> index build (published)
+
+indexing (write)   search (read)  ->  search/v1 (GET /v1/search)
+        \              /
+     records, index, matching
+```
+
+- **`app/records/`** is the canonical, source-neutral model: a
+  `DocumentHeader` per version (with the `url` a reader views it at, and
+  `source`, the source's own details typed per source type in
+  `source_metadata`: `GuideMetadata` today),
+  `SectionRecord`s (whole sections, kept as blocks, with a section
+  `content_hash`) and the `ChunkRecord`s a strategy derives from them. Sections
+  are stored as `sections/{documentId}/{versionId}.jsonl`, and are what every
+  rebuild starts from. A `ChunkSet` is one strategy's chunks of one version at
+  one status, staged as `staged/{strategy}/{documentId}/{versionId}/{status}.jsonl`
+  for the apply step.
+- **Ids**: every document and version id is a UUID. Guides use the CMS's
+  (always UUIDv7). A source without its own, such as GOV.UK content, mints
+  deterministic UUIDv5s under its own namespace (`ids.minted_id`), so the
+  same content always gets the same ids and sources never collide.
+- **`app/ingestion/`** is how guide versions arrive: the HTTP routes, the
+  indexing queue's guide events (`models.py`) they send, and the preparation
+  that handles each (see [Indexing](#indexing)).
+- **`app/indexing/`** indexes a version in two steps (`stages.py`), so that
+  preparing can scale out behind a single writer. `models.py` holds the index
+  sync queue's events, which nothing sends yet:
+  - **`prepare/`** turns an `IndexJob` into an `ApplyJob`. A `SourceReader` per
+    source type reads one version into a `SourceDocument` (a guide's
+    `content.md` today, with `guide_cms` modelling the CMS API's guide and
+    its metadata; GOV.UK content items would be another reader with their
+    own Content API models and metadata type), `sectioning`
+    makes the canonical sections, and a named `ChunkingStrategy` (`packed-800-v2`
+    for the keyword index) chunks them. `DocumentPreparer` stores the sections
+    and stages the chunk set. It never touches the index.
+  - **`apply/`** writes an `ApplyJob`'s staged chunk set to the index.
+    `DocumentApplier` refuses chunks from any strategy but
+    `index_schema.CHUNK_STRATEGY`, and `publish` applies a job to the active
+    build and publishes the result. It never reads a source or chunks.
+- **`app/search/`** answers queries from the index. `app/search/v1/` is the HTTP
+  contract; a breaking change is a new `v2/` beside it.
+- **`app/index/`** is the index itself: its fields and `SCHEMA_VERSION`, the
+  `ChunkIndex` protocols, the Tantivy engine, and its builds in S3 and the
+  active build in MongoDB, both keyed by schema version. Each replica checks
+  the active build every `INDEX_REFRESH_INTERVAL_SECONDS` (default 60) and
+  swaps in a newer one.
+- **`app/matching/`** decides what counts as a match, for the engine and for
+  excerpts alike.
+- **`app/entrypoints/`** runs the app: FastAPI (`fastapi.py`) and the queue
+  consumers (`queue_consumers.py`), which hand each message's event to its
+  sub-domain. A queue is an entry point, not a domain.
+
+Indexing and search never import each other, and indexing never imports
+ingestion.
+
+### Schemas and models
+
+Each layer knows only the one directly below it:
+
+```text
+HTTP JSON  <-  schemas.py   Pydantic: from_model() and conversions to models
+                   |
+               models.py    dataclasses and enums: to_document() / from_document()
+                   |
+               Mongo record (a dict)
+```
+
+- **`schemas.py`** holds the shapes that cross the HTTP boundary: request bodies,
+  response bodies, and payloads other services send us (such as cdp-uploader's
+  callback). They are Pydantic, which validates them, writes them into the OpenAPI
+  document and spells them in camelCase on the wire. A schema converts to and from
+  models, and knows nothing of how anything is stored.
+- **`models.py`** holds what the service works with: plain dataclasses and enums,
+  with no HTTP in them. A model converts itself to and from the record Mongo stores
+  (`to_document()` and `from_document()`), so the stored field names are written
+  down once. A model never imports a schema.
+- **Routers** only call the conversions; they don't build shapes themselves.
+- The role decides the file, not the library: `AppConfig` is Pydantic and lives in
+  `config.py`.
+
+### Ids
+
+`app/records/ids.py` gives each kind of id a type of its own (`typing.NewType`), so
+mypy refuses one where another belongs:
+
+- **`DocumentId` and `VersionId`** are uuids. A guide's are the CMS's, always
+  version 7 (time-ordered), and refused otherwise: a path id that isn't one is
+  answered with 422. A source without ids of its own mints them (`minted_id`).
+- **`SectionId` and `ChunkId`** are `str`, hashed from what they identify unless
+  the source supplies its own.
+
 ## API endpoints
 
 | Endpoint                        | Description                    |
@@ -241,36 +326,84 @@ uv run pytest
 | `GET: /docs`                    | Automatic API Swagger docs (the same document is committed as `docs/openapi.json`; regenerate with `uv run task openapi`) |
 | `GET: /health`                  | Health check endpoint          |
 | `GET: /v1/search`               | Word search (`q`, optionally inside one document with `tag`, paged by `limit` and `offset`; `group=document` pages documents instead, each with its best `sections`) or title search (`title`); published documents only for now |
-| `PUT: /documents/{documentId}/versions/{versionId}` | Index a version (202). The body carries exactly one of `contentUrl` (`s3://…/content.md`) or `content` (`markdown`), plus `status`, `occurredAt`, `versionNumber` and the CMS `metadata`. `status` must be `published` (the index holds one version per document, so anything else is refused with 422), and `metadata.guideTitle` is required: it is the indexed title, never the Markdown's `# ` line. A version older than the one indexed is skipped. `http` mode only. |
-| `DELETE: /documents/{documentId}/versions/{versionId}` | Remove a version at every status (202): from the index if it is the version indexed, and its staged files. `http` mode only. |
+| `PUT: /documents/{documentId}/versions/{versionId}` | Queue a version to be indexed (202). The body carries `contentUrl` (`s3://<managed-docs bucket>/…/content.md`), `status`, `occurredAt`, `versionNumber` and the CMS `metadata`. Inline `content` is refused (422): a whole document can be larger than a queue message. `status` must be `published` (the index holds one version per document, so anything else is refused with 422), and `metadata.guideTitle` is required: it is the indexed title, never the Markdown's `# ` line. A version older than the one indexed is skipped. 503 if the request could not be queued. `http` mode only. |
+| `DELETE: /documents/{documentId}/versions/{versionId}` | Queue a version's removal at every status (202): from the index if it is the version indexed, and its staged files. 503 if it could not be queued. `http` mode only. |
 
-Both ingestion routes reply once the request is valid and do the work afterwards.
-Each replica prepares up to 4 versions at once, and writes to the index in
-batches: whatever arrives while one batch is being published goes in the next,
-so a burst of requests costs one more upload of the index rather than one each.
-Requests may finish out of arrival order; an older version never replaces a
-newer one, nor brings back a deleted one. Requests for the same version take
-turns. A job that fails before writing fails alone; a failed write fails its
-whole batch, which publishes nothing. A failure is logged and counted
-(`IngestionFailed`, with `ENABLE_METRICS`), not retried: resending the same request
-is always safe.
+## Indexing
 
-## The indexing queue's events
+Guide versions arrive on the indexing queue, and each replica prepares them and
+writes the index itself. The queue belongs to the sub-domain it reaches, whose
+`models.py` defines its events; its consumer is an entry point
+(`app/entrypoints/queue_consumers.py`), like the HTTP routes.
 
-The indexing queue carries guide events as [CloudEvents 1.0](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/spec.md)
-JSON. The contract is [`docs/asyncapi.json`](docs/asyncapi.json), generated from
-`app/ingestion/models.py` with `uv run task asyncapi`.
+1. **Ingestion routes → indexing queue** (`app/ingestion/`). Each route puts a
+   guide event on the indexing queue and replies 202. `rpa-ai-guidance-hub-api`
+   will publish the same events to its guide-events topic, which is subscribed
+   to the same queue.
+2. **Preparation** (`app/ingestion/preparation.py`, every replica, up to 4
+   messages at once). It reads the version's `content.md` from the managed-docs
+   bucket, stores its sections, and stages its chunks as one object in the
+   search-store bucket (`staged/{strategy}/{documentId}/{versionId}/{status}.jsonl`,
+   written in one PUT, so it is whole or absent).
+3. **Writing the index, in process** (`app/indexing/dispatch.py`). The prepared
+   job goes to the replica's `BatchingDispatcher`, which publishes every job
+   waiting at once, and the message is acknowledged only once its job is
+   written. A deletion removes the version from the index, then deletes its
+   sections and staged chunk set.
 
-| `type` | `data` |
-| --- | --- |
-| `uk.gov.defra.rpa.guidancehub.guide.version.published` | `documentId`, `versionId`, `sourceType`, `status`, `contentUrl`, `versionNumber`, `metadata` |
-| `uk.gov.defra.rpa.guidancehub.guide.version.deleted` | `documentId`, `versionId` |
+**Limitation:** as with the ingestion routes before, every replica writes the
+index. With more than one replica, two publishes at once can lose one's build
+swap. The index sync queue (FIFO, one message group) will make one writer of
+all replicas: its events are defined below, but nothing sends or consumes
+them yet.
 
-- `dataschema` names the version of `data`
-  (`urn:defra:rpa-ai-guidance-hub:events:guide-version-published:v1`). A breaking
-  change is a new version (`…:v2`); within a version, changes are additive.
-- An event of an unknown type is ignored. One that doesn't validate, or is in a
-  version the service doesn't read, is dead-lettered.
+A message whose handler fails is retried after its visibility timeout, and moved
+to the queue's `-deadletter` queue after 3 receives: content that is missing or
+may not be read, a malformed event, or a `contentUrl` outside the managed-docs
+bucket. Every step is idempotent, so redriving a dead letter is always safe.
+Failures are logged and counted (`IngestionFailed`, with `ENABLE_METRICS`).
+
+### Events
+
+Every message on either queue is a [CloudEvents 1.0](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/spec.md)
+event in structured JSON mode: the whole event is the message body. All of them
+subclass the one CloudEvents base in `app/common/cloudevents.py`. The contract is
+the AsyncAPI 3.0 document [`docs/asyncapi.yaml`](docs/asyncapi.yaml): both queues,
+their SQS bindings, every message with an example, and their payload schemas,
+generated from the models (`uv run task asyncapi`). The pull-request workflow
+checks it is current and valid.
+
+| Queue | `type` | `data` |
+| --- | --- | --- |
+| indexing | `uk.gov.defra.rpa.guidancehub.guide.version.published` | `documentId`, `versionId`, `sourceType`, `status`, `contentUrl`, `versionNumber`, `metadata` (the PUT body's keys) |
+| indexing | `uk.gov.defra.rpa.guidancehub.guide.version.deleted` | `documentId`, `versionId` |
+| index sync | `uk.gov.defra.rpa.guidancehub.search.guide.version.prepared` | `documentId`, `versionId`, `status`, `strategy`, `chunkSet` (`bucket`, `key`) |
+| index sync | `uk.gov.defra.rpa.guidancehub.search.guide.version.removal-requested` | `documentId`, `versionId` |
+
+- Guide events are the hub's, not search's: the API will produce them, and
+  search's routes send them only until it does. So `source` names whichever
+  service sent one and is never checked (today always
+  `/rpa-ai-guidance-hub-search/ingestion`), and their `type`s and `dataschema`s
+  name the hub. The index sync queue's events are search's own.
+- `dataschema` is a URN naming the `data` schema's owner, the schema and its
+  major version (`urn:defra:rpa-ai-guidance-hub:events:guide-version-published:v1`);
+  the AsyncAPI document gives each schema its URN as `$id`.
+- `time` is when the version reached its status (the PUT body's `occurredAt`).
+- `subject` is `documents/{documentId}/versions/{versionId}`.
+- The `cdprequestid` extension carries the CDP trace id, so the writer's logs
+  carry the id of the request that started the work.
+
+Within v1, changes are additive and readers ignore what they don't know. A
+breaking change to `data` is a new schema and URN (`…:v2`), with the same `type`.
+On the indexing queue, an event of another type is acknowledged and ignored,
+since the topic may carry guide events search doesn't need; on the index sync
+queue, which only search writes, it is dead-lettered. An event of a known type
+that doesn't validate, or names a schema version the service doesn't read, is
+dead-lettered.
+
+If the topic's subscription doesn't use raw message delivery, guide events
+arrive inside an SNS envelope; setting the consumer's `unwrap_sns=True` reads
+both forms.
 
 ## Custom Cloudwatch Metrics
 

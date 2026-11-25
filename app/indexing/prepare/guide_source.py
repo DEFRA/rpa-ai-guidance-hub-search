@@ -1,4 +1,4 @@
-"""Reads one guide version, from S3 or inline, into a `SourceDocument`."""
+"""Reads one guide version from S3 into a `SourceDocument`."""
 
 import asyncio
 

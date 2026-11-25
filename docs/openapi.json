@@ -2,7 +2,7 @@
   "components": {
     "schemas": {
       "Accepted": {
-        "description": "The request was accepted; the work happens after this reply.",
+        "description": "The request was accepted and queued; the work happens after this reply.",
         "properties": {
           "documentId": {
             "format": "uuid",
@@ -258,6 +258,7 @@
             "anyOf": [
               {
                 "minLength": 1,
+                "pattern": "\\S",
                 "type": "string"
               },
               {
@@ -320,28 +321,12 @@
         "type": "object"
       },
       "IndexRequest": {
-        "description": "Index this published version. Exactly one of `contentUrl` or `content`.\n\nOnly `published` is accepted: the index holds one version per document, so\na version awaiting publication would replace the one readers can see.",
+        "description": "Index this published version, whose content is at `contentUrl`.",
         "properties": {
-          "content": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/InlineContent"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "contentUrl": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Contenturl"
+            "pattern": "^s3://[^/?#]+/+[^/?#]",
+            "title": "Contenturl",
+            "type": "string"
           },
           "metadata": {
             "$ref": "#/components/schemas/IndexMetadata"
@@ -352,7 +337,9 @@
             "type": "string"
           },
           "sourceType": {
-            "$ref": "#/components/schemas/SourceType"
+            "const": "guide",
+            "title": "Sourcetype",
+            "type": "string"
           },
           "status": {
             "const": "published",
@@ -363,6 +350,7 @@
             "anyOf": [
               {
                 "minLength": 1,
+                "pattern": "\\S",
                 "type": "string"
               },
               {
@@ -387,24 +375,10 @@
           "sourceType",
           "status",
           "occurredAt",
+          "contentUrl",
           "metadata"
         ],
         "title": "IndexRequest",
-        "type": "object"
-      },
-      "InlineContent": {
-        "description": "The version's `content.md`.",
-        "properties": {
-          "markdown": {
-            "minLength": 1,
-            "title": "Markdown",
-            "type": "string"
-          }
-        },
-        "required": [
-          "markdown"
-        ],
-        "title": "InlineContent",
         "type": "object"
       },
       "Match": {
@@ -581,13 +555,6 @@
         "title": "SnippetPart",
         "type": "object"
       },
-      "SourceType": {
-        "enum": [
-          "guide"
-        ],
-        "title": "SourceType",
-        "type": "string"
-      },
       "TitleMatch": {
         "description": "Where the words are in a document's title, which they cover.",
         "properties": {
@@ -761,7 +728,7 @@
   "paths": {
     "/documents/{documentId}/versions/{versionId}": {
       "delete": {
-        "description": "Remove this version, at every status, from the index and staged files.",
+        "description": "Queue this version's removal, at every status, from the index and staged files.",
         "operationId": "delete_version_documents__documentId__versions__versionId__delete",
         "parameters": [
           {
@@ -807,6 +774,9 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "description": "The request could not be queued; send it again"
           }
         },
         "summary": "Delete Version",
@@ -815,7 +785,7 @@
         ]
       },
       "put": {
-        "description": "Prepare this version, and index it if it is published.",
+        "description": "Queue this version to be prepared, then indexed.",
         "operationId": "index_version_documents__documentId__versions__versionId__put",
         "parameters": [
           {
@@ -862,9 +832,6 @@
             },
             "description": "Successful Response"
           },
-          "413": {
-            "description": "Inline content too large"
-          },
           "422": {
             "content": {
               "application/json": {
@@ -874,6 +841,9 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "description": "The request could not be queued; send it again"
           }
         },
         "summary": "Index Version",

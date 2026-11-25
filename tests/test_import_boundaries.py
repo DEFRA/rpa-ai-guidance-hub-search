@@ -7,6 +7,7 @@ import pytest
 
 APP = pathlib.Path(__file__).parent.parent / "app"
 ALLOWED = {APP / "index" / "tantivy_schema.py", APP / "index" / "tantivy_index.py"}
+SQS_CONSUMER = APP / "common" / "sqs_consumer"
 
 # The write side (indexing) and the read side (search) share `index` and
 # `matching` but never import each other; the shared packages import neither.
@@ -14,7 +15,16 @@ ALLOWED = {APP / "index" / "tantivy_schema.py", APP / "index" / "tantivy_index.p
 # Within indexing, preparing (sources, sections, chunks) never touches the
 # index, and applying (staged chunks into the index) never prepares.
 FORBIDDEN = {
-    "indexing": {"app.search"},
+    "indexing": {"app.search", "app.ingestion"},
+    "ingestion": {"app.search"},
+    "common": {
+        "app.indexing",
+        "app.ingestion",
+        "app.search",
+        "app.index",
+        "app.records",
+        "app.matching",
+    },
     "indexing/prepare": {"app.index", "app.indexing.apply"},
     "indexing/apply": {"app.indexing.prepare"},
     "search": {"app.indexing"},
@@ -72,6 +82,25 @@ class TestTheTantivyImports:
 
     def test_check_finds_the_schema_module(self):
         assert "tantivy" in _imports(APP / "index" / "tantivy_schema.py")
+
+
+class TestTheQueueConsumerImports:
+    """Queues are entry points: only `app/entrypoints/` knows SQS messages."""
+
+    def test_are_only_in_the_entry_points(self):
+        offenders = [
+            str(path.relative_to(APP))
+            for path in APP.rglob("*.py")
+            if not path.is_relative_to(SQS_CONSUMER)
+            and "entrypoints" not in path.relative_to(APP).parts
+            and _imports_any(path, {"app.common.sqs_consumer"})
+        ]
+        assert offenders == []
+
+    def test_check_finds_the_consumers_module(self):
+        assert _imports_any(
+            APP / "entrypoints" / "queue_consumers.py", {"app.common.sqs_consumer"}
+        )
 
 
 class TestTheDomainImports:

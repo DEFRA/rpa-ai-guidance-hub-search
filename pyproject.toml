@@ -16,7 +16,6 @@ dependencies = [
     "httpx2==2.16.2",
     "multidict==7.2.1",
     "opentelemetry-api==1.45.2",
-    "pydantic-ai-slim[bedrock]==2.70.0",
     "pydantic-settings==2.16.3",
     "pymongo[aws,encryption,snappy,zstd]==4.20.0",
     "rapidfuzz==3.14.6",
@@ -124,3 +123,4 @@ exclude-newer = "1 week"
 # drops the Comodo AAA root that cross-signed the compromised eMudhra G3 root.
 exclude-newer-package = { certifi = false, boto3 = false, botocore = false }
 default-groups = ["dev"]
+

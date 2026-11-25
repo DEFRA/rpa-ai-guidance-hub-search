@@ -12,10 +12,14 @@
   in either ingestion mode; needs S3 and MongoDB.
   (`uv run task index-document --source-type guide --document-id … --version-id … --status published
   --content-url s3://…/content.md`; reads `.env`, so copy `.env.example` first.)
+- `export_asyncapi.py` — write the queues' AsyncAPI document to
+  `docs/asyncapi.yaml` (`uv run task asyncapi`), or with `--check` fail if the
+  committed file is stale (`uv run task asyncapi-check`, run by the
+  pull-request workflow, which also validates it with the AsyncAPI CLI).
 - `send_document.py` — local development only. Sends one version to a running
-  service's ingestion routes, as the CMS will: `--content-url s3://…` or
-  `--content-file guide.md` to index, `--delete` to remove. `--url` defaults to `http://localhost:8085`; the service must be in
-  `http` mode (the default).
+  service's ingestion routes, as the CMS will: `--content-url s3://…` (in the
+  managed-docs bucket) to index, `--delete` to remove. `--url` defaults to
+  `http://localhost:8085`; the service must be in `http` mode (the default).
   Versions are sent as `published`, with `--title` as their `title`.
   (`uv run task send-document --document-id … --version-id … --title "…"
-  --content-file guide.md`.)
+  --content-url s3://…/content.md`.)
