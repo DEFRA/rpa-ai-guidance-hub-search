@@ -13,7 +13,7 @@ from app.indexing.prepare import guide_cms, guide_content, guide_markdown, guide
 from app.records import ids, models
 
 if TYPE_CHECKING:
-    from types_boto3_s3 import S3Client
+    import types_boto3_s3
 
     from app.indexing.prepare import sources
 
@@ -43,14 +43,12 @@ class _DataModel(pydantic.BaseModel):
     )
 
 
-class GuideMetadata(guide_cms.CmsGuideMetadata):
-    """The CMS's metadata; `guideTitle` is required, and is the indexed title."""
-
-    guide_title: Annotated[
-        str,
-        pydantic.StringConstraints(strip_whitespace=True, min_length=1),
-        pydantic.Field(json_schema_extra={"pattern": NOT_BLANK_PATTERN}),
-    ]
+Title = Annotated[
+    str,
+    pydantic.StringConstraints(strip_whitespace=True, min_length=1),
+    pydantic.Field(json_schema_extra={"pattern": NOT_BLANK_PATTERN}),
+]
+"""The version's title, which search indexes; never blank."""
 
 
 def _s3_url(url: str) -> str:
@@ -76,8 +74,9 @@ class GuideVersionPublishedDataV1(_DataModel):
     source_type: Literal[models.SourceType.GUIDE]
     status: Literal[models.DocumentStatus.PUBLISHED]
     content_url: S3Url
+    title: Title
     version_number: str | None = None
-    metadata: GuideMetadata
+    metadata: guide_cms.CmsGuideMetadata
 
 
 class GuideVersionDeletedDataV1(_DataModel):
@@ -116,7 +115,7 @@ class GuideVersionPublishedV1(cloudevents.KnownEvent):
             occurred_at=self.time,
         )
 
-    def to_reader(self, client: S3Client) -> sources.SourceReader:
+    def to_reader(self, client: types_boto3_s3.S3Client) -> sources.SourceReader:
         """Reads the version's content from S3, with its title and metadata."""
         metadata = guide_cms.version_metadata(
             self.data.metadata, self.data.version_number
@@ -126,7 +125,7 @@ class GuideVersionPublishedV1(cloudevents.KnownEvent):
             guide_content.S3ContentSource(client),
             guide_markdown.GuideMarkdownParser(),
             metadata,
-            self.data.metadata.guide_title,
+            self.data.title,
         )
 
 

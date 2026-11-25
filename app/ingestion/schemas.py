@@ -18,7 +18,7 @@ from app.indexing.prepare import (
 from app.records import ids, models
 
 if TYPE_CHECKING:
-    from types_boto3_s3 import S3Client
+    import types_boto3_s3
 
 
 class _CamelModel(pydantic.BaseModel):
@@ -35,12 +35,13 @@ class InlineContent(_CamelModel):
     markdown: str = pydantic.Field(min_length=1)
 
 
-class IndexMetadata(guide_cms.CmsGuideMetadata):
-    """The CMS's metadata; `guideTitle` is required, and is the indexed title."""
+Title = Annotated[str, pydantic.StringConstraints(strip_whitespace=True, min_length=1)]
 
-    guide_title: Annotated[
-        str, pydantic.StringConstraints(strip_whitespace=True, min_length=1)
-    ]
+
+class IndexMetadata(guide_cms.CmsGuideMetadata):
+    """The CMS's metadata. `guideTitle` is the title when `title` isn't sent."""
+
+    guide_title: Title | None = None
 
 
 class IndexRequest(_CamelModel):
@@ -55,6 +56,7 @@ class IndexRequest(_CamelModel):
     occurred_at: pydantic.AwareDatetime
     content_url: str | None = None
     content: InlineContent | None = None
+    title: Title | None = None
     version_number: str | None = None
     metadata: IndexMetadata
 
@@ -66,6 +68,14 @@ class IndexRequest(_CamelModel):
 
         if self.content_url is not None:
             guide_content.parse_s3_url(self.content_url)
+
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def _a_title(self) -> Self:
+        if self.title is None and self.metadata.guide_title is None:
+            msg = "send title, or metadata.guideTitle"
+            raise ValueError(msg)
 
         return self
 
@@ -89,11 +99,15 @@ class IndexRequest(_CamelModel):
             occurred_at=self.occurred_at,
         )
 
-    def to_reader(self, client: S3Client) -> sources.SourceReader:
-        """Reads the inline content, or the referenced content from S3."""
+    def to_reader(self, client: types_boto3_s3.S3Client) -> sources.SourceReader:
+        """Reads the inline content, or the referenced content from S3.
+
+        The title is `title`, else `metadata.guideTitle`, which the hub API sends
+        until it sends `title`.
+        """
         parser = guide_markdown.GuideMarkdownParser()
         metadata = guide_cms.version_metadata(self.metadata, self.version_number)
-        title = self.metadata.guide_title
+        title = self.title or self.metadata.guide_title
 
         content: guide_content.ContentSource = (
             guide_content.S3ContentSource(client)

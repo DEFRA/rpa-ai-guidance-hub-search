@@ -25,7 +25,8 @@ class IndexJob:
 
     `source_type` picks the reader. `content_url` is where that reader finds
     this exact version, e.g. `s3://<bucket>/<documentId>/<versionId>/content.md`
-    for a guide. `occurred_at` is when the version reached `status`.
+    for a guide. `occurred_at` is when the event asking for this was published,
+    kept for the record: nothing orders by it.
 
     `version_id` is None when the source has no version ids of its own: its
     reader mints one from what it reads (`ids.minted_id`), so it can't be known
@@ -69,7 +70,8 @@ class ApplyJob:
 class RemoveJob:
     """Take this version out of the index, if it is the version indexed.
 
-    Covers every status of the version. `occurred_at` is when it was deleted.
+    Covers every status of the version. `occurred_at` is when the event asking
+    for this was published.
     """
 
     document_id: ids.DocumentId

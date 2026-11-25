@@ -107,7 +107,8 @@ class TestRouting:
             pytest.param({"contentUrl": "/a/b"}, id="not-s3"),
             pytest.param({"documentId": str(uuid.uuid4())}, id="not-a-cms-id"),
             pytest.param({"status": "ready_for_publish"}, id="not-published"),
-            pytest.param({"metadata": {"owner": "Team"}}, id="no-title"),
+            pytest.param({"title": None}, id="no-title"),
+            pytest.param({"title": "  "}, id="blank-title"),
         ],
     )
     def test_refuses_a_known_type_with_invalid_data(self, data):

@@ -50,8 +50,9 @@ def _body(args: argparse.Namespace) -> dict[str, Any]:
         "sourceType": args.source_type,
         "status": models.DocumentStatus.PUBLISHED.value,
         "occurredAt": dt.datetime.now(dt.UTC).isoformat(),
+        "title": args.title,
         "versionNumber": args.version_number,
-        "metadata": {"guideTitle": args.title},
+        "metadata": {},
     }
 
     if args.content_url:

@@ -49,7 +49,13 @@ class KnownEvent(CloudEvent):
 
     TYPE: ClassVar[str]
 
-    time: pydantic.AwareDatetime
+    time: pydantic.AwareDatetime = pydantic.Field(
+        description=(
+            "When this event was published. Sending the same change again is a"
+            " new event, with a new time. Search doesn't order by it: a"
+            " document's versions are ordered by their ids."
+        )
+    )
     datacontenttype: Literal["application/json"] = DATA_CONTENT_TYPE
     dataschema: str
 

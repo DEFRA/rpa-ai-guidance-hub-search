@@ -115,6 +115,28 @@ class TestIndex:
             guidance_types=("Process guide",),
         )
 
+    @pytest.mark.parametrize(
+        ("fields", "title"),
+        [
+            pytest.param({"title": f" {TITLE} "}, TITLE, id="title"),
+            pytest.param(
+                {"title": TITLE, "metadata": {"guideTitle": "Older Title"}},
+                TITLE,
+                id="title-before-guide-title",
+            ),
+            pytest.param({"metadata": {"guideTitle": TITLE}}, TITLE, id="guide-title"),
+        ],
+    )
+    async def test_index_the_title_else_the_guide_title(
+        self, client, ingestion, fields, title
+    ):
+        client.put(PATH, json=_body(**fields))
+        job, reader, _ = _indexed(ingestion)
+
+        document = await reader.read(job)
+
+        assert document.header.title == title
+
     def test_passes_on_the_trace_id(self, client, ingestion):
         client.put(PATH, json=_body(), headers={"x-cdp-request-id": "trace-1"})
 
@@ -133,7 +155,8 @@ class TestIndex:
             pytest.param({"status": "ready_for_publish"}, id="not-published"),
             pytest.param({"metadata": None}, id="no-metadata"),
             pytest.param({"metadata": {"owner": "Team"}}, id="no-title"),
-            pytest.param({"metadata": {"guideTitle": "  "}}, id="blank-title"),
+            pytest.param({"metadata": {"guideTitle": "  "}}, id="blank-guide-title"),
+            pytest.param({"title": "  "}, id="blank-title"),
             pytest.param({"sourceType": "govuk"}, id="unknown-source"),
         ],
     )

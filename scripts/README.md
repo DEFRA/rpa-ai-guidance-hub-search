@@ -16,6 +16,6 @@
   service's ingestion routes, as the CMS will: `--content-url s3://…` or
   `--content-file guide.md` to index, `--delete` to remove. `--url` defaults to `http://localhost:8085`; the service must be in
   `http` mode (the default).
-  Versions are sent as `published`, with `--title` as the CMS's `guideTitle`.
+  Versions are sent as `published`, with `--title` as their `title`.
   (`uv run task send-document --document-id … --version-id … --title "…"
   --content-file guide.md`.)

@@ -130,8 +130,8 @@ class TestTheContractAgreesWithTheReader:
             ),
             pytest.param(
                 events.published(),
-                {"metadata": {"guideTitle": "   "}},
-                id="blank-guide-title",
+                {"title": "   "},
+                id="blank-title",
             ),
         ],
     )

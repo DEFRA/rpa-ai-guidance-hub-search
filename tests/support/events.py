@@ -24,8 +24,9 @@ def published(
             "sourceType": "guide",
             "status": "published",
             "contentUrl": f"s3://{bucket}/{guides.content_key(document_id, version_id)}",
+            "title": TITLE,
             "versionNumber": "1.0",
-            "metadata": {"guideTitle": TITLE, "owner": "Schemes team"},
+            "metadata": {"owner": "Schemes team"},
         },
     )
 
