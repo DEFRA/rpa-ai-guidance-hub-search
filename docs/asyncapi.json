@@ -76,13 +76,13 @@
                 "documentId": "0199b8a2-0000-7000-8000-00000000f001",
                 "metadata": {
                   "audience": [],
-                  "guideTitle": "Field Visit Guide",
                   "owner": "Schemes team",
                   "schemes": [],
                   "systems": []
                 },
                 "sourceType": "guide",
                 "status": "published",
+                "title": "Field Visit Guide",
                 "versionId": "0199b8a2-0000-7000-8000-00000000f002",
                 "versionNumber": "1.0"
               },
@@ -186,6 +186,7 @@
             "title": "Subject"
           },
           "time": {
+            "description": "When this event was published. Sending the same change again is a new event, with a new time. Search doesn't order by it: a document's versions are ordered by their ids.",
             "format": "date-time",
             "title": "Time",
             "type": "string"
@@ -223,7 +224,7 @@
             "type": "string"
           },
           "metadata": {
-            "description": "The CMS's metadata; `guideTitle` is required, and is the indexed title.",
+            "description": "What the authoring journey collected. `guidance_type` may be one or many.",
             "properties": {
               "audience": {
                 "default": [],
@@ -264,10 +265,16 @@
                 "title": "Guidancetype"
               },
               "guideTitle": {
-                "minLength": 1,
-                "pattern": "\\S",
-                "title": "Guidetitle",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Guidetitle"
               },
               "owner": {
                 "anyOf": [
@@ -322,10 +329,7 @@
                 "type": "array"
               }
             },
-            "required": [
-              "guideTitle"
-            ],
-            "title": "GuideMetadata",
+            "title": "CmsGuideMetadata",
             "type": "object"
           },
           "sourceType": {
@@ -336,6 +340,12 @@
           "status": {
             "const": "published",
             "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Title",
             "type": "string"
           },
           "versionId": {
@@ -363,6 +373,7 @@
           "sourceType",
           "status",
           "contentUrl",
+          "title",
           "metadata"
         ],
         "title": "GuideVersionPublishedDataV1",
@@ -425,6 +436,7 @@
             "title": "Subject"
           },
           "time": {
+            "description": "When this event was published. Sending the same change again is a new event, with a new time. Search doesn't order by it: a document's versions are ordered by their ids.",
             "format": "date-time",
             "title": "Time",
             "type": "string"

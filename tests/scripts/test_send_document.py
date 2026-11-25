@@ -59,7 +59,7 @@ class TestSendDocument:
         assert (
             request_body.status,
             request_body.content_url,
-            request_body.metadata.guide_title,
+            request_body.title,
         ) == ("published", url, "Claims Guidance")
         assert "content" not in body
 

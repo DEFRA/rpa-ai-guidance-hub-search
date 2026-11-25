@@ -216,7 +216,7 @@
         "type": "object"
       },
       "IndexMetadata": {
-        "description": "The CMS's metadata; `guideTitle` is required, and is the indexed title.",
+        "description": "The CMS's metadata. `guideTitle` is the title when `title` isn't sent.",
         "properties": {
           "audience": {
             "default": [],
@@ -255,9 +255,16 @@
             "title": "Guidancetype"
           },
           "guideTitle": {
-            "minLength": 1,
-            "title": "Guidetitle",
-            "type": "string"
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guidetitle"
           },
           "owner": {
             "anyOf": [
@@ -309,9 +316,6 @@
             "type": "array"
           }
         },
-        "required": [
-          "guideTitle"
-        ],
         "title": "IndexMetadata",
         "type": "object"
       },
@@ -354,6 +358,18 @@
             "const": "published",
             "title": "Status",
             "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
           },
           "versionNumber": {
             "anyOf": [

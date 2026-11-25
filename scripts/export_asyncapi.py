@@ -268,8 +268,9 @@ def _published_example() -> ingestion_models.GuideVersionPublishedV1:
                 "s3://rpa-ai-guidance-hub-managed-docs/"
                 f"{EXAMPLE_DOCUMENT_ID}/{EXAMPLE_VERSION_ID}/content.md"
             ),
+            "title": "Field Visit Guide",
             "versionNumber": "1.0",
-            "metadata": {"guideTitle": "Field Visit Guide", "owner": "Schemes team"},
+            "metadata": {"owner": "Schemes team"},
         },
     )
     event = ingestion_models.guide_version_published(data, EXAMPLE_TIME)
