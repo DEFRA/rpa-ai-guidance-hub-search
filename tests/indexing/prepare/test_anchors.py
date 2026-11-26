@@ -13,7 +13,10 @@ class TestSlugify:
         ("heading", "anchor"),
         [
             pytest.param("Evidence Required", "evidence-required", id="lower-case"),
-            pytest.param("3.1 Overview", "31-overview", id="number-dot-dropped"),
+            pytest.param("3.1 Overview", "3-1-overview", id="number-dot-hyphenated"),
+            pytest.param("1.2.3 Steps", "1-2-3-steps", id="number-dots-hyphenated"),
+            pytest.param("Steps, e.g. these.", "steps-eg-these", id="other-dot-goes"),
+            pytest.param("2024-25 Claims", "2024-25-claims", id="number-hyphen-stays"),
             pytest.param(
                 "Annex A - Case types",
                 "annex-a---case-types",
