@@ -5,7 +5,7 @@ invented for tests.
 
 ## 1 Planning a visit
 
-Read [preparing evidence](#11-preparing-evidence) and the
+Read [preparing evidence](#1-1-preparing-evidence) and the
 [payment windows](#a1-payment-windows) before you book a visit. The booking
 service is at [the visits portal](HTTPS://Visits.Example.COM:443/book?type=field#start).
 

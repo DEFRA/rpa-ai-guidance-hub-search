@@ -185,11 +185,11 @@ class TestSections:
             for chunk in chunks[1:]
         ] == [
             (("Overview",), "1", "1-overview", 1),
-            (("Overview", "Eligibility"), "1.1", "11-eligibility", 2),
+            (("Overview", "Eligibility"), "1.1", "1-1-eligibility", 2),
             (
                 ("Overview", "Eligibility", "Concurrent claims"),
                 "1.1.1",
-                "111-concurrent-claims",
+                "1-1-1-concurrent-claims",
                 3,
             ),
             (("Payments",), "2", "2-payments", 1),
@@ -203,8 +203,8 @@ class TestSections:
 
         assert [
             found[anchor].parent_section_id
-            for anchor in ("1-overview", "11-eligibility", "111-concurrent-claims")
-        ] == [None, found["1-overview"].section_id, found["11-eligibility"].section_id]
+            for anchor in ("1-overview", "1-1-eligibility", "1-1-1-concurrent-claims")
+        ] == [None, found["1-overview"].section_id, found["1-1-eligibility"].section_id]
         assert found["2-payments"].parent_section_id is None
         assert found["a1-detail"].parent_section_id == found["annex-a"].section_id
 
@@ -296,7 +296,7 @@ class TestSectionIds:
     def test_hash_the_heading_path(self):
         _, chunks = _chunk(NESTED)
 
-        assert _by_anchor(chunks)["11-eligibility"].section_id == ids.section_id(
+        assert _by_anchor(chunks)["1-1-eligibility"].section_id == ids.section_id(
             models.SourceType.GUIDE,
             guides.DOCUMENT_ID,
             ("Overview", "Eligibility"),
