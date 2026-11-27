@@ -64,7 +64,8 @@ def indexing_queue(
 
     Every message handled at once shares `pending`, so the jobs that arrive while
     the index is being published go together in the next publish. It is the
-    process's one, so the admin reset can hold the writer's turn too.
+    process's one, so the admin reset can hold the writer's turn, and keep
+    preparations out, too.
     """
     store_bucket = config.search_store_s3_bucket
     worker = preparation.PreparationWorker(
@@ -77,6 +78,7 @@ def indexing_queue(
         content_bucket=config.managed_docs_s3_bucket,
         sections=section_store.S3SectionStore(s3_client, store_bucket),
         chunk_sets=chunk_set_store.S3ChunkSetStore(s3_client, store_bucket),
+        gate=pending.gate,
     )
 
     return consumer.Consumer(

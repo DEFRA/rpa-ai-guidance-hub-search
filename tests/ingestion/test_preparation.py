@@ -9,7 +9,7 @@ import pytest
 from botocore import exceptions as botocore_exceptions
 
 from app.common import cloudevents
-from app.indexing import jobs
+from app.indexing import dispatch, jobs
 from app.indexing.prepare import document_preparer, packed_chunking
 from app.ingestion import preparation
 from app.records import ids
@@ -265,3 +265,74 @@ class TestUnknown:
         await worker.handle(event)
 
         assert dispatcher.jobs == []
+
+
+class TestGate:
+    async def test_a_preparation_holds_the_gate_until_it_is_dispatched(
+        self, s3_client, stores
+    ):
+        sections, staged = stores
+        gate = dispatch.PreparationGate()
+        reached = asyncio.Event()
+        release = asyncio.Event()
+
+        class BlockingDispatcher(RecordingDispatcher):
+            async def dispatch(self, job):
+                reached.set()
+                await release.wait()
+                await super().dispatch(job)
+
+        worker = preparation.PreparationWorker(
+            preparer_for=lambda readers: document_preparer.DocumentPreparer(
+                readers, sections, packed_chunking.PackedChunking(), staged
+            ),
+            dispatcher=BlockingDispatcher(),
+            client=s3_client,
+            content_bucket=BUCKET,
+            sections=sections,
+            chunk_sets=staged,
+            gate=gate,
+        )
+        _upload(s3_client)
+        handling = asyncio.create_task(worker.handle(events.published()))
+        await reached.wait()
+
+        exclusive = asyncio.create_task(_hold(gate))
+        await asyncio.sleep(0.05)
+
+        assert not exclusive.done()
+
+        release.set()
+        await handling
+        await exclusive
+
+    async def test_a_preparation_waits_while_the_gate_is_held(self, dispatcher):
+        gate = dispatch.PreparationGate()
+        sections = fake_section_store.InMemorySectionStore()
+        staged = fake_chunk_set_store.InMemoryChunkSetStore()
+        gated = preparation.PreparationWorker(
+            preparer_for=lambda readers: document_preparer.DocumentPreparer(
+                readers, sections, packed_chunking.PackedChunking(), staged
+            ),
+            dispatcher=dispatcher,
+            client=None,
+            content_bucket=BUCKET,
+            sections=sections,
+            chunk_sets=staged,
+            gate=gate,
+        )
+
+        async with gate.exclusive():
+            handling = asyncio.create_task(gated.handle(events.deleted()))
+            await asyncio.sleep(0.05)
+
+            assert dispatcher.jobs == []
+
+        await handling
+
+        assert len(dispatcher.jobs) == 1
+
+
+async def _hold(gate):
+    async with gate.exclusive():
+        pass

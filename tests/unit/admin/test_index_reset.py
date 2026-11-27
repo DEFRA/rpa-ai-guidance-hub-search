@@ -1,13 +1,18 @@
-"""The reset empties the index's state and storage, in order, under the writer's turn."""
+"""The reset empties the index's state and storage, in order, under the writer's turn.
+
+Neither a preparation under way nor a cancelled request may see it half done.
+"""
 
 import ast
 import asyncio
 import pathlib
+import threading
 
 import pytest
 
 from app.admin import index_reset
 from app.index import active_index, builds, tantivy_index
+from app.indexing import dispatch
 from tests.fakes import builds as fake_builds
 from tests.support import chunks as fixtures
 
@@ -51,12 +56,12 @@ async def state(mongo_database):
     return collection
 
 
-async def _reset(database, s3_client, index_builds, tmp_path, turn=None):
+async def _reset(database, s3_client, index_builds, tmp_path, pending=None):
     return await index_reset.reset(
         database,
         s3_client,
         BUCKET,
-        turn or asyncio.Lock(),
+        pending or dispatch.PendingWrites(),
         tmp_path / "serve",
         index_builds,
     )
@@ -157,24 +162,159 @@ class TestReset:
     async def test_waits_for_the_writers_turn(
         self, mongo_database, s3, state, index_builds, tmp_path
     ):
-        turn = asyncio.Lock()
-        await turn.acquire()
+        pending = dispatch.PendingWrites()
+        await pending.turn.acquire()
 
         task = asyncio.create_task(
-            _reset(mongo_database, s3, index_builds, tmp_path, turn)
+            _reset(mongo_database, s3, index_builds, tmp_path, pending)
         )
         await asyncio.sleep(0.05)
 
         assert not task.done()
         assert await state.count_documents({}) == 2
 
-        turn.release()
+        pending.turn.release()
         await task
 
         assert await state.count_documents({}) == 0
 
 
-APP = pathlib.Path(__file__).parent.parent.parent / "app"
+class TestWithPreparations:
+    async def test_waits_for_a_preparation_under_way(
+        self, mongo_database, s3, state, index_builds, tmp_path
+    ):
+        pending = dispatch.PendingWrites()
+        staged = asyncio.Event()
+        finish = asyncio.Event()
+
+        async def prepare():
+            async with pending.gate.preparing():
+                s3.put_object(Bucket=BUCKET, Key="sections/doc", Body=b"x")
+                staged.set()
+                await finish.wait()
+
+        preparation = asyncio.create_task(prepare())
+        await staged.wait()
+        task = asyncio.create_task(
+            _reset(mongo_database, s3, index_builds, tmp_path, pending)
+        )
+        await asyncio.sleep(0.05)
+
+        assert not task.done()
+        assert await state.count_documents({}) == 2
+
+        finish.set()
+        await preparation
+        result = await task
+
+        assert result.deleted_objects == 1
+        assert "Contents" not in s3.list_objects_v2(Bucket=BUCKET)
+
+    async def test_makes_a_preparation_that_arrives_meanwhile_wait(
+        self, mongo_database, s3, state, index_builds, tmp_path
+    ):
+        pending = dispatch.PendingWrites()
+        await pending.turn.acquire()  # holds the reset where it is
+        task = asyncio.create_task(
+            _reset(mongo_database, s3, index_builds, tmp_path, pending)
+        )
+        await asyncio.sleep(0.05)
+        started = asyncio.Event()
+
+        async def prepare():
+            async with pending.gate.preparing():
+                started.set()
+                s3.put_object(Bucket=BUCKET, Key="sections/late", Body=b"x")
+
+        preparation = asyncio.create_task(prepare())
+        await asyncio.sleep(0.05)
+
+        assert not started.is_set()
+
+        pending.turn.release()
+        await task
+        await preparation
+
+        assert started.is_set()
+        assert await state.count_documents({}) == 0
+
+    @pytest.mark.usefixtures("state")
+    async def test_lets_a_preparation_that_waited_for_the_turn_finish_first(
+        self, mongo_database, s3, index_builds, tmp_path
+    ):
+        pending = dispatch.PendingWrites()
+        await pending.turn.acquire()  # a publish under way
+        dispatched = asyncio.Event()
+
+        async def prepare():
+            async with pending.gate.preparing():
+                s3.put_object(Bucket=BUCKET, Key="sections/doc", Body=b"x")
+
+                async with pending.turn:  # dispatching needs the writer's turn
+                    dispatched.set()
+
+        preparation = asyncio.create_task(prepare())
+        await asyncio.sleep(0.05)
+        task = asyncio.create_task(
+            _reset(mongo_database, s3, index_builds, tmp_path, pending)
+        )
+        await asyncio.sleep(0.05)
+
+        assert not task.done()
+
+        pending.turn.release()
+        await asyncio.gather(preparation, task)
+
+        assert dispatched.is_set()
+        assert "Contents" not in s3.list_objects_v2(Bucket=BUCKET)
+
+
+class TestCancelled:
+    @pytest.mark.usefixtures("state")
+    async def test_keeps_the_writers_turn_until_the_wipe_has_finished(
+        self, mongo_database, s3, index_builds, tmp_path, mocker
+    ):
+        pending = dispatch.PendingWrites()
+        s3.put_object(Bucket=BUCKET, Key="sections/old", Body=b"x")
+        in_wipe = threading.Event()
+        resume = threading.Event()
+        delete_objects = s3.delete_objects
+
+        def slow_delete(**kwargs):
+            in_wipe.set()
+            resume.wait(timeout=5)
+
+            return delete_objects(**kwargs)
+
+        mocker.patch.object(s3, "delete_objects", side_effect=slow_delete)
+        request = asyncio.create_task(
+            _reset(mongo_database, s3, index_builds, tmp_path, pending)
+        )
+        await asyncio.to_thread(in_wipe.wait, 5)
+        writer = asyncio.create_task(_write_under(pending.turn, s3, "builds/new"))
+
+        request.cancel()
+        await asyncio.sleep(0.05)
+
+        assert request.cancelled()
+        assert pending.turn.locked()
+        assert not writer.done()
+
+        resume.set()
+        await writer
+        await asyncio.gather(*index_reset._running)
+
+        keys = [item["Key"] for item in s3.list_objects_v2(Bucket=BUCKET)["Contents"]]
+
+        assert keys == ["builds/new"]
+
+
+async def _write_under(turn, s3, key):
+    async with turn:
+        s3.put_object(Bucket=BUCKET, Key=key, Body=b"x")
+
+
+APP = pathlib.Path(__file__).parent.parent.parent.parent / "app"
 
 
 def _collections_used(source: str) -> set[str]:
@@ -202,18 +342,18 @@ def _collections_used(source: str) -> set[str]:
     return used
 
 
-def test_the_reset_clears_every_collection_the_app_uses():
-    used = {
-        name
-        for path in APP.rglob("*.py")
-        if not path.is_relative_to(APP / "admin")
-        for name in _collections_used(path.read_text())
-    }
+class TestCollections:
+    def test_the_reset_clears_every_collection_the_app_uses(self):
+        used = {
+            name
+            for path in APP.rglob("*.py")
+            if not path.is_relative_to(APP / "admin")
+            for name in _collections_used(path.read_text())
+        }
 
-    assert used <= set(builds.INDEX_STATE_COLLECTIONS)
+        assert used <= set(builds.INDEX_STATE_COLLECTIONS)
 
-
-def test_the_check_finds_a_collection():
-    assert _collections_used((APP / "index" / "builds.py").read_text()) == {
-        builds.INDEX_STATE
-    }
+    def test_the_check_finds_a_collection(self):
+        assert _collections_used((APP / "index" / "builds.py").read_text()) == {
+            builds.INDEX_STATE
+        }

@@ -9,6 +9,9 @@ the index safe whichever order jobs reach it in, but the files a version stages
 are not: events for the same version take turns (`VersionLocks`), so a
 publication that is still preparing can't stage files again after a deletion
 has cleaned them up, nor two preparations mix their sections and chunks.
+
+Each event also holds the `PreparationGate` until its job is dispatched, so an
+index reset (which wipes those files) never lands in the middle of one.
 """
 
 import asyncio
@@ -88,6 +91,7 @@ class PreparationWorker:
         chunk_sets: chunk_set_store.ChunkSetStore,
         strategy: str = index_schema.CHUNK_STRATEGY,
         versions: VersionLocks | None = None,
+        gate: dispatch.PreparationGate | None = None,
     ) -> None:
         self._preparer_for = preparer_for
         self._dispatcher = dispatcher
@@ -97,14 +101,17 @@ class PreparationWorker:
         self._chunk_sets = chunk_sets
         self._strategy = strategy
         self._versions = versions or VersionLocks()
+        self._gate = gate or dispatch.PreparationGate()
 
     async def handle(self, event: models.IndexingEvent) -> None:
         """Indexes a published version, or removes a deleted one; ignores the rest."""
         match event:
             case models.GuideVersionPublishedV1():
-                await self._index(event)
+                async with self._gate.preparing():
+                    await self._index(event)
             case models.GuideVersionDeletedV1():
-                await self._remove(event.to_job())
+                async with self._gate.preparing():
+                    await self._remove(event.to_job())
             case cloudevents.UnknownEvent():
                 logger.info(
                     "Ignored %s event %s from %s", event.type, event.id, event.source

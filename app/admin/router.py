@@ -48,7 +48,7 @@ async def reset_index(
             database,
             s3_client,
             config.search_store_s3_bucket,
-            pending.turn,
+            pending,
             config.search_index_directory,
             index_builds,
         )

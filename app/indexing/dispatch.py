@@ -6,8 +6,9 @@ Today the writer runs in this process. A queue-backed dispatcher can replace
 """
 
 import asyncio
+import contextlib
 import dataclasses
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from typing import Protocol
 
 from app.indexing import jobs
@@ -29,12 +30,65 @@ class BatchResult(Protocol):
 PublishAll = Callable[[Sequence[jobs.WriteJob]], Awaitable[BatchResult]]
 
 
+class PreparationGate:
+    """Lets any number of preparations run, or one exclusive holder, never both.
+
+    A preparation writes sections and staged chunk sets into the store, and
+    holds the gate until its job has been dispatched. Whoever wipes the store
+    takes the gate exclusively: it waits for the preparations under way, and
+    preparations that arrive meanwhile wait for it. So no preparation ever
+    straddles a wipe, with some of its files gone and the rest dispatched.
+    """
+
+    def __init__(self) -> None:
+        self._preparing = 0
+        self._exclusive = 0
+        self._idle = asyncio.Event()
+        self._idle.set()
+        self._open = asyncio.Event()
+        self._open.set()
+
+    @contextlib.asynccontextmanager
+    async def preparing(self) -> AsyncIterator[None]:
+        await self._open.wait()
+
+        # No await between the wait and the count, so no exclusive holder can
+        # slip in between them.
+        self._preparing += 1
+        self._idle.clear()
+
+        try:
+            yield
+        finally:
+            self._preparing -= 1
+
+            if self._preparing == 0:
+                self._idle.set()
+
+    @contextlib.asynccontextmanager
+    async def exclusive(self) -> AsyncIterator[None]:
+        self._exclusive += 1
+        self._open.clear()
+
+        try:
+            await self._idle.wait()
+
+            yield
+        finally:
+            self._exclusive -= 1
+
+            if self._exclusive == 0:
+                self._open.set()
+
+
 @dataclasses.dataclass
 class PendingWrites:
     """Jobs waiting for the writer, and the writer's turn; one per process.
 
     Every `BatchingDispatcher` around the same `PendingWrites` shares one queue.
     `publishing` holds the tasks that publish, which asyncio keeps only weakly.
+    `gate` keeps preparations and a wipe of the store apart; take it before
+    `turn`, as a preparation under way needs `turn` to finish.
     """
 
     jobs: list[tuple[jobs.WriteJob, asyncio.Future[None]]] = dataclasses.field(
@@ -42,6 +96,7 @@ class PendingWrites:
     )
     turn: asyncio.Lock = dataclasses.field(default_factory=asyncio.Lock)
     publishing: set[asyncio.Task[None]] = dataclasses.field(default_factory=set)
+    gate: PreparationGate = dataclasses.field(default_factory=PreparationGate)
 
 
 class BatchingDispatcher:

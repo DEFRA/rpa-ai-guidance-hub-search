@@ -30,25 +30,24 @@ def _client(mode):
     return fastapi.testclient.TestClient(app)
 
 
-@pytest.mark.parametrize("mode", list(app_config.IngestionMode))
-@pytest.mark.usefixtures("reset")
-def test_replies_with_the_counts_in_camel_case(mode):
-    response = _client(mode).post(PATH)
+class TestReset:
+    @pytest.mark.parametrize("mode", list(app_config.IngestionMode))
+    @pytest.mark.usefixtures("reset")
+    def test_replies_with_the_counts_in_camel_case(self, mode):
+        response = _client(mode).post(PATH)
 
-    assert response.status_code == 200
-    assert response.json() == {"deletedObjects": 7, "deletedStateRecords": 1}
+        assert response.status_code == 200
+        assert response.json() == {"deletedObjects": 7, "deletedStateRecords": 1}
 
+    def test_uses_the_pending_writes_the_indexing_queue_shares(self, reset):
+        _client(app_config.IngestionMode.S3).post(PATH)
 
-def test_holds_the_writers_turn_the_indexing_queue_shares(reset):
-    _client(app_config.IngestionMode.S3).post(PATH)
+        assert reset.call_args.args[3] is pending_writes.get_pending_writes()
 
-    assert reset.call_args.args[3] is pending_writes.get_pending_writes().turn
+    def test_replies_503_without_saying_why_when_the_reset_fails(self, reset):
+        reset.side_effect = RuntimeError("secret detail")
 
+        response = _client(app_config.IngestionMode.HTTP).post(PATH)
 
-def test_replies_503_without_saying_why_when_the_reset_fails(reset):
-    reset.side_effect = RuntimeError("secret detail")
-
-    response = _client(app_config.IngestionMode.HTTP).post(PATH)
-
-    assert response.status_code == 503
-    assert "secret detail" not in response.text
+        assert response.status_code == 503
+        assert "secret detail" not in response.text

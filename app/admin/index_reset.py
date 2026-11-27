@@ -15,7 +15,12 @@ The reset is idempotent: after a failure, run it again.
 **Concurrency**
 
 - *This process:* the wipe holds the writer's turn, so no batch is mid-publish
-  here while it runs.
+  here while it runs. It also holds the preparation gate, taken first: it waits
+  for the preparations under way to be dispatched, and later ones wait for it,
+  so none has staged files before the wipe and dispatched after it.
+- *Cancellation:* the wipe runs as a task of its own, so a cancelled request
+  stops waiting but not the wipe, which keeps the turn until its S3 calls (in a
+  thread, which can't be cancelled) have finished.
 - *A publish that loses the race:* a batch that started before the reset has its
   `swap(expected=old)` match nothing, so `publish` deletes its upload and raises
   `LostSwapError`. The SQS message is retried, prepared again from the managed
@@ -37,6 +42,7 @@ import pymongo
 
 from app.common import tracing
 from app.index import active_index, builds
+from app.indexing import dispatch
 
 if TYPE_CHECKING:
     from types_boto3_s3 import S3Client
@@ -58,16 +64,41 @@ class ResetResult:
     deleted_state_records: int
 
 
-async def reset(  # noqa: PLR0913
+# asyncio keeps tasks only weakly; a wipe must outlive its request.
+_running: set[asyncio.Task[ResetResult]] = set()
+
+
+async def reset(
     database: pymongo.asynchronous.database.AsyncDatabase,
     s3_client: S3Client,
     bucket: str,
-    writer_turn: asyncio.Lock,
+    pending: dispatch.PendingWrites,
     directory: pathlib.Path,
     index_builds: builds.IndexBuildService,
 ) -> ResetResult:
-    """Wipes the index's state and storage; raises if any of it could not be."""
-    async with writer_turn:
+    """Wipes the index's state and storage; raises if any of it could not be.
+
+    Once called it runs to the end, even if the caller is cancelled.
+    """
+    task = asyncio.create_task(
+        _reset(database, s3_client, bucket, pending, directory, index_builds)
+    )
+    _running.add(task)
+    task.add_done_callback(_running.discard)
+
+    return await asyncio.shield(task)
+
+
+async def _reset(
+    database: pymongo.asynchronous.database.AsyncDatabase,
+    s3_client: S3Client,
+    bucket: str,
+    pending: dispatch.PendingWrites,
+    directory: pathlib.Path,
+    index_builds: builds.IndexBuildService,
+) -> ResetResult:
+    # The gate first: preparations under way need the turn to finish.
+    async with pending.gate.exclusive(), pending.turn:
         deleted_state_records = 0
 
         for name in builds.INDEX_STATE_COLLECTIONS:
