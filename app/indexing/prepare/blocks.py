@@ -151,11 +151,7 @@ def _logical_lines(lines: Sequence[str]) -> tuple[str, ...]:
             blank = True
             continue
 
-        marker = _LIST_MARKER.match(line if quote is None else quote)
-        if quote is not None:
-            text = _without_hard_break(quote[marker.end() :] if marker else quote)
-        else:
-            text = _without_hard_break(line[marker.end() :] if marker else line)
+        marker, text = _item_text(line if quote is None else quote)
 
         if marker or blank or (quote is not None) != quoting:
             groups.append([text])
@@ -167,6 +163,15 @@ def _logical_lines(lines: Sequence[str]) -> tuple[str, ...]:
 
     stripped = (plain_text.strip_inline(" ".join(group)) for group in groups)
     return tuple(line for line in stripped if line)
+
+
+def _item_text(line: str) -> tuple[bool, str]:
+    """Whether `line` starts a list item, and its words without the mark or a hard
+    break."""
+    marker = _LIST_MARKER.match(line)
+    return marker is not None, _without_hard_break(
+        line[marker.end() :] if marker else line
+    )
 
 
 def _quoted_in_item(line: str) -> str | None:
