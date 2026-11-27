@@ -53,7 +53,7 @@ def apply_job(chunk_set_key: str = "staged/s/d/v/published.jsonl") -> jobs.Apply
         version_id=guides.VERSION_ID,
         status=guides.job().status,
         occurred_at=TIME,
-        strategy="packed-800-v2",
+        strategy="packed-800-v3",
         chunk_set_key=chunk_set_key,
     )
 

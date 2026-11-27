@@ -22,7 +22,7 @@ def _apply_job(occurred_at):
         version_id=guides.VERSION_ID,
         status=models.DocumentStatus.PUBLISHED,
         occurred_at=occurred_at,
-        strategy="packed-800-v2",
+        strategy="packed-800-v3",
         chunk_set_key="key",
     )
 

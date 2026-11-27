@@ -13,16 +13,16 @@ def _sections(*parts):
 
 class TestPackedChunking:
     def test_is_named_by_its_size(self):
-        assert packed_chunking.PackedChunking(300).name == "packed-300-v2"
+        assert packed_chunking.PackedChunking(300).name == "packed-300-v3"
 
     def test_names_every_chunk_by_the_strategy(self):
         sections = _sections("One.", "Two.")
 
         chunks = packed_chunking.PackedChunking(300).chunk(sections)
 
-        assert {chunk.strategy for chunk in chunks} == {"packed-300-v2"}
+        assert {chunk.strategy for chunk in chunks} == {"packed-300-v3"}
         assert chunks[0].chunk_id == ids.chunk_id(
-            "packed-300-v2",
+            "packed-300-v3",
             sections[0].section_id,
             0,
         )
