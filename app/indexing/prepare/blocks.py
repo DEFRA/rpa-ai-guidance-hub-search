@@ -138,8 +138,9 @@ def _block(kind: models.BlockKind, lines: Sequence[str]) -> models.Block:
 
 def _logical_lines(lines: Sequence[str]) -> tuple[str, ...]:
     """A new line at each list item, after a blank line, and where a quote in a list
-    item starts; a quote's lines are read without their "> " marks, and an empty one
-    ends a paragraph, as a blank line does."""
+    item starts; a quote's lines are read without their "> " marks, a list in it a line
+    per item without their marks, and an empty one ends a paragraph, as a blank line
+    does."""
     groups: list[list[str]] = []
     blank = True
     quoting = False
@@ -150,9 +151,9 @@ def _logical_lines(lines: Sequence[str]) -> tuple[str, ...]:
             blank = True
             continue
 
-        marker = _LIST_MARKER.match(line)
+        marker = _LIST_MARKER.match(line if quote is None else quote)
         if quote is not None:
-            text = _without_hard_break(quote)
+            text = _without_hard_break(quote[marker.end() :] if marker else quote)
         else:
             text = _without_hard_break(line[marker.end() :] if marker else line)
 
