@@ -17,8 +17,9 @@ from app.records import models
 MAX_TOKENS = 800
 
 # Bumped whenever the chunks change for the same sections, or the sections for
-# the same Markdown (2: a hard break is a space, not a new line).
-_REVISION = 2
+# the same Markdown (2: a hard break is a space, not a new line; 3: a quote in a list
+# item is read without its marks).
+_REVISION = 3
 
 
 class PackedChunking:

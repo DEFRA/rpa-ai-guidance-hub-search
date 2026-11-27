@@ -137,27 +137,50 @@ def _block(kind: models.BlockKind, lines: Sequence[str]) -> models.Block:
 
 
 def _logical_lines(lines: Sequence[str]) -> tuple[str, ...]:
-    """A new line at each list item and after a blank line."""
+    """A new line at each list item, after a blank line, and where a quote in a list
+    item starts; a quote's lines are read without their "> " marks, a list in it a line
+    per item without their marks, and an empty one ends a paragraph, as a blank line
+    does."""
     groups: list[list[str]] = []
     blank = True
+    quoting = False
 
     for line in lines:
-        if not line.strip():
+        quote = _quoted_in_item(line)
+        if not line.strip() or quote == "":
             blank = True
             continue
 
-        marker = _LIST_MARKER.match(line)
-        text = _without_hard_break(line[marker.end() :] if marker else line)
+        marker, text = _item_text(line if quote is None else quote)
 
-        if marker or blank:
+        if marker or blank or (quote is not None) != quoting:
             groups.append([text])
         else:
             groups[-1].append(text)
 
         blank = False
+        quoting = quote is not None
 
     stripped = (plain_text.strip_inline(" ".join(group)) for group in groups)
     return tuple(line for line in stripped if line)
+
+
+def _item_text(line: str) -> tuple[bool, str]:
+    """Whether `line` starts a list item, and its words without the mark or a hard
+    break."""
+    marker = _LIST_MARKER.match(line)
+    return marker is not None, _without_hard_break(
+        line[marker.end() :] if marker else line
+    )
+
+
+def _quoted_in_item(line: str) -> str | None:
+    """An indented line's words after its quote mark, as in a quote in a list item;
+    None for any other line."""
+    words = line.lstrip()
+    if not line[:1].isspace() or not words.startswith(">"):
+        return None
+    return words[1:].removeprefix(" ").strip()
 
 
 def _without_hard_break(line: str) -> str:

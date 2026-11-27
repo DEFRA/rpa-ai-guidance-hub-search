@@ -60,6 +60,27 @@ class TestParse:
             (Kind.BLOCKQUOTE, ("quote",)),
         ]
 
+    def test_a_quote_in_a_list_item_has_a_line_per_paragraph_without_its_marks(
+        self, chef
+    ):
+        body = "- Step one\n\n  > Version used: 1\n  >\n  > TEXT: on hold\n\n- Step two"
+
+        assert _kinds(body, chef) == [
+            (Kind.LIST, ("Step one", "Version used: 1", "TEXT: on hold", "Step two")),
+        ]
+
+    def test_a_list_in_a_quote_in_a_list_item_has_a_line_per_item_without_marks(
+        self, chef
+    ):
+        assert _kinds("- Step one\n\n  > - gates\n  > - stock", chef) == [
+            (Kind.LIST, ("Step one", "gates", "stock")),
+        ]
+
+    def test_a_quote_in_a_list_item_starts_a_line_after_the_items_words(self, chef):
+        assert _kinds("- Step one\n  > Version used: 1", chef) == [
+            (Kind.LIST, ("Step one", "Version used: 1")),
+        ]
+
     def test_a_blockquote_is_one_block_with_a_line_per_paragraph(self, chef):
         body = "> Dear [name]\n>\n> We will visit.\n>\n> - gates\n> - stock"
 
