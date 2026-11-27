@@ -66,3 +66,17 @@ class TestLines:
             "Apply",
             "Record",
         )
+
+    def test_reads_a_list_after_bold_closed_just_after_a_break(self):
+        assert tables.lines("| **Intro<br>**- Apply<br>- Record |") == (
+            "Intro",
+            "Apply",
+            "Record",
+        )
+
+    def test_reads_a_list_after_a_link_closed_just_after_a_break(self):
+        assert tables.lines("| [Intro<br>](#steps)- Apply<br>- Record |") == (
+            "Intro",
+            "Apply",
+            "Record",
+        )

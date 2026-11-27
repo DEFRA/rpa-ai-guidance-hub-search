@@ -14,6 +14,16 @@ _DELIMITER = re.compile(r"^\|(?:\s*:?-+:?\s*\|)+\s*$")
 _BREAK = re.compile(r"<br\s*/?>")
 _MARK = "- "
 _TAGS = ("u", "sup", "sub")
+# Each mark that can close at the start of a part, and the mark it closes.
+_CLOSERS = (
+    ("**", "**"),
+    ("~~", "~~"),
+    ("*", "*"),
+    ("</u>", "<u>"),
+    ("</sup>", "<sup>"),
+    ("</sub>", "<sub>"),
+)
+_SPAN_ENDS = ("]{.red}", "]{.blue}")
 # ASCII punctuation: all CommonMark lets a backslash escape.
 _ESCAPABLE = frozenset("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
 _ESCAPED_PIPE = "\\|"
@@ -58,9 +68,9 @@ def _lines_of(cell: str) -> tuple[str, ...]:
     an unstyled "- ", when every line after it does too, each is an item of a list,
     after the lines before it as one line; otherwise the cell is one line (the UI's
     `tiptap/tables.js`, `promote`)."""
-    parts = _BREAK.split(cell.strip())
+    parts = _closed_back(_BREAK.split(cell.strip()))
     items = [
-        part.startswith(_MARK) and not _is_open("".join(parts[:at]))
+        part.startswith(_MARK) and not _open_marks("".join(parts[:at]))
         for at, part in enumerate(parts)
     ]
     first = next((at for at, item in enumerate(items) if item), None)
@@ -73,17 +83,62 @@ def _lines_of(cell: str) -> tuple[str, ...]:
     return tuple(line for line in found if line)
 
 
-def _is_open(text: str) -> bool:
-    """Whether a mark opened in `text` is still open at its end, so that what follows
-    is styled: bold, italics, strikethrough, a link's or colour span's words, or
+def _closed_back(parts: list[str]) -> list[str]:
+    """The parts, each mark that closes at the start of one moved back to the end of
+    the part before it, where it was opened: `**Intro<br>**- Apply` is the parts
+    `**Intro**` and `- Apply`, whose mark is unstyled."""
+    fixed = parts[:1]
+    for part in parts[1:]:
+        rest = part
+        while (mark := _closing_mark("".join(fixed), rest)) is not None:
+            fixed[-1] += mark
+            rest = rest.removeprefix(mark)
+        fixed.append(rest)
+    return fixed
+
+
+def _closing_mark(before: str, rest: str) -> str | None:
+    """The mark at the start of `rest` that closes one still open in `before`."""
+    opened = _open_marks(before)
+    for mark, opener in _CLOSERS:
+        if opener in opened and rest.startswith(mark):
+            return mark
+    if "[" not in opened:
+        return None
+    colour = next((end for end in _SPAN_ENDS if rest.startswith(end)), None)
+    return colour if colour is not None else _link_end(rest)
+
+
+def _link_end(rest: str) -> str | None:
+    """`rest`'s start when it ends a link's words and gives where it goes, `](...)`."""
+    if not rest.startswith("]("):
+        return None
+    if rest.startswith("](<"):
+        end = rest.find(">)")
+        return None if end < 0 else rest[: end + 2]
+    depth = 1
+    for at, character in enumerate(rest[2:], start=2):
+        depth += (character == "(") - (character == ")")
+        if depth == 0:
+            return rest[: at + 1]
+    return None
+
+
+def _open_marks(text: str) -> set[str]:
+    """The marks opened in `text` and still open at its end, so that what follows is
+    styled: bold, italics, strikethrough, a link's or colour span's words, or
     underline, superscript or subscript. The converter writes each mark in pairs."""
     plain = _unescaped(text)
-    bold = plain.count("**")
-    italic = plain.replace("**", "").count("*")
-    struck = plain.count("~~")
-    words = plain.count("[") - plain.count("]")
-    tags = any(plain.count(f"<{tag}>") != plain.count(f"</{tag}>") for tag in _TAGS)
-    return bool(bold % 2 or italic % 2 or struck % 2 or words or tags)
+    counts = {
+        "**": plain.count("**") % 2,
+        "*": plain.replace("**", "").count("*") % 2,
+        "~~": plain.count("~~") % 2,
+        "[": plain.count("[") - plain.count("]"),
+    }
+    counts |= {
+        f"<{tag}>": plain.count(f"<{tag}>") - plain.count(f"</{tag}>") for tag in _TAGS
+    }
+    return {mark for mark, count in counts.items() if count}
 
 
 def _unescaped(text: str) -> str:
