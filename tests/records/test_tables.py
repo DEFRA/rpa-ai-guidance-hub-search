@@ -49,3 +49,20 @@ class TestLines:
 
     def test_reads_a_number_as_words_not_as_a_mark(self):
         assert tables.lines("| 1. Apply<br>2. Record |") == ("1. Apply 2. Record",)
+
+    def test_reads_a_cell_as_one_line_when_bold_runs_on_across_its_marks(self):
+        assert tables.lines("| **Intro<br>- Apply<br>- Record** |") == (
+            "Intro - Apply - Record",
+        )
+
+    def test_reads_a_cell_as_one_line_when_a_link_runs_on_across_its_marks(self):
+        assert tables.lines("| [Intro<br>- Apply<br>- Record](#steps) |") == (
+            "Intro - Apply - Record",
+        )
+
+    def test_reads_a_list_after_bold_closed_before_its_marks(self):
+        assert tables.lines("| **Intro**<br>- Apply<br>- Record |") == (
+            "Intro",
+            "Apply",
+            "Record",
+        )
