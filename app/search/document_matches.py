@@ -111,4 +111,4 @@ def _lines(block: models.Block) -> tuple[str, ...]:
     if block.kind is not models.BlockKind.TABLE:
         return block.lines
 
-    return tuple(cell for row in tables.rows(block.markdown) for cell in row)
+    return tables.lines(block.markdown)

@@ -160,6 +160,24 @@ async def test_reads_each_table_cell_as_a_line_of_its_own(stored, finder):
     assert across.sections == ()
 
 
+async def test_places_a_match_after_a_list_in_a_table_cell_as_the_page_reads_it(
+    stored, finder
+):
+    document_id = await stored(
+        "## Rates\n\n| Item | Pay |\n|------|-----|\n| Late | - Apply<br>- Record |"
+        "\n\nPay now.",
+    )
+
+    found = await finder.matches_in(document_id, "now", PUBLISHED)
+
+    page = "Rates\nItem\nPay\nLate\nApply\nRecord\nPay now."
+    start = page.index("now")
+    assert found is not None
+    assert found.sections == (
+        SectionMatches("rates", (Match(start, start + 3, "now"),)),
+    )
+
+
 async def test_keeps_an_escaped_pipe_within_its_table_cell(stored, finder):
     document_id = await stored(
         "## Rates\n\n| Item | Pay |\n|------|-----|\n| A \\| B | Pay |",
