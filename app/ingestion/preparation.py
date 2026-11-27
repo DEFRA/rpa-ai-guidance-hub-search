@@ -9,13 +9,16 @@ the index safe whichever order jobs reach it in, but the files a version stages
 are not: events for the same version take turns (`VersionLocks`), so a
 publication that is still preparing can't stage files again after a deletion
 has cleaned them up, nor two preparations mix their sections and chunks.
+
+Each event also holds the `PreparationGate` until its job is dispatched, so an
+index reset (which wipes those files) never lands in the middle of one.
 """
 
 import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncIterator, Callable, Mapping
-from typing import TYPE_CHECKING
+from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
+from typing import TYPE_CHECKING, Any
 
 from botocore import exceptions as botocore_exceptions
 
@@ -88,6 +91,7 @@ class PreparationWorker:
         chunk_sets: chunk_set_store.ChunkSetStore,
         strategy: str = index_schema.CHUNK_STRATEGY,
         versions: VersionLocks | None = None,
+        gate: dispatch.PreparationGate | None = None,
     ) -> None:
         self._preparer_for = preparer_for
         self._dispatcher = dispatcher
@@ -97,18 +101,38 @@ class PreparationWorker:
         self._chunk_sets = chunk_sets
         self._strategy = strategy
         self._versions = versions or VersionLocks()
+        self._gate = gate or dispatch.PreparationGate()
+        # asyncio keeps tasks only weakly; the work must outlive its handler.
+        self._running: set[asyncio.Task[None]] = set()
 
     async def handle(self, event: models.IndexingEvent) -> None:
-        """Indexes a published version, or removes a deleted one; ignores the rest."""
+        """Indexes a published version, or removes a deleted one; ignores the rest.
+
+        The work runs as a task of its own, which holds the gate until it has
+        finished. A cancelled handler stops waiting but not the work, whose
+        storage writes (in threads) can't be cancelled, so a reset never wipes
+        the bucket while one of them is still to land.
+        """
         match event:
             case models.GuideVersionPublishedV1():
-                await self._index(event)
+                await self._hold_gate(self._index(event))
             case models.GuideVersionDeletedV1():
-                await self._remove(event.to_job())
+                await self._hold_gate(self._remove(event.to_job()))
             case cloudevents.UnknownEvent():
                 logger.info(
                     "Ignored %s event %s from %s", event.type, event.id, event.source
                 )
+
+    async def _hold_gate(self, work: Coroutine[Any, Any, None]) -> None:
+        async def run() -> None:
+            async with self._gate.preparing():
+                await work
+
+        task = asyncio.create_task(run())
+        self._running.add(task)
+        task.add_done_callback(self._running.discard)
+
+        await asyncio.shield(task)
 
     async def _index(self, event: models.GuideVersionPublishedV1) -> None:
         bucket, _ = guide_content.parse_s3_url(event.data.content_url)

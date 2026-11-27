@@ -57,6 +57,9 @@ BuildId = NewType("BuildId", str)
 INDEX_PREFIX = "guide-cms/index"
 INDEX_STATE = "index_state"
 
+INDEX_STATE_COLLECTIONS = (INDEX_STATE,)
+"""Every collection the index reset clears; add a new collection here."""
+
 # Tantivy's lock files belong to a running writer, not to the index.
 _LOCK_SUFFIX = ".lock"
 

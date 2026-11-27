@@ -415,6 +415,25 @@
         "title": "Operation",
         "type": "string"
       },
+      "ResetResult": {
+        "description": "What the reset removed.",
+        "properties": {
+          "deletedObjects": {
+            "title": "Deletedobjects",
+            "type": "integer"
+          },
+          "deletedStateRecords": {
+            "title": "Deletedstaterecords",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deletedObjects",
+          "deletedStateRecords"
+        ],
+        "title": "ResetResult",
+        "type": "object"
+      },
       "SectionMatches": {
         "properties": {
           "anchor": {
@@ -726,6 +745,31 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/admin/index/reset": {
+      "post": {
+        "description": "Delete everything in the index and its storage, and serve an empty index.\n\nReturns once the wipe has finished. Idempotent: if it fails, send it again.\nThere is no authentication: it relies on network trust, like the ingestion\nroutes.",
+        "operationId": "reset_index_admin_index_reset_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResetResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "description": "The index could not be reset; send it again"
+          }
+        },
+        "summary": "Reset Index",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/documents/{documentId}/versions/{versionId}": {
       "delete": {
         "description": "Queue this version's removal, at every status, from the index and staged files.",

@@ -15,9 +15,11 @@ SQS_CONSUMER = APP / "common" / "sqs_consumer"
 # Within indexing, preparing (sources, sections, chunks) never touches the
 # index, and applying (staged chunks into the index) never prepares.
 FORBIDDEN = {
-    "indexing": {"app.search", "app.ingestion"},
-    "ingestion": {"app.search"},
+    "admin": {"app.search", "app.ingestion"},
+    "indexing": {"app.admin", "app.search", "app.ingestion"},
+    "ingestion": {"app.admin", "app.search"},
     "common": {
+        "app.admin",
         "app.indexing",
         "app.ingestion",
         "app.search",
@@ -27,10 +29,10 @@ FORBIDDEN = {
     },
     "indexing/prepare": {"app.index", "app.indexing.apply"},
     "indexing/apply": {"app.indexing.prepare"},
-    "search": {"app.indexing"},
-    "index": {"app.indexing", "app.search"},
-    "matching": {"app.indexing", "app.search", "app.index", "app.records"},
-    "records": {"app.indexing", "app.search", "app.index", "app.matching"},
+    "search": {"app.admin", "app.indexing"},
+    "index": {"app.admin", "app.indexing", "app.search"},
+    "matching": {"app.admin", "app.indexing", "app.search", "app.index", "app.records"},
+    "records": {"app.admin", "app.indexing", "app.search", "app.index", "app.matching"},
 }
 
 
