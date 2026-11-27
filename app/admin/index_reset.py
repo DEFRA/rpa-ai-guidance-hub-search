@@ -45,8 +45,8 @@ from app.index import active_index, builds
 from app.indexing import dispatch
 
 if TYPE_CHECKING:
-    from types_boto3_s3 import S3Client
-    from types_boto3_s3.type_defs import ObjectIdentifierTypeDef
+    import types_boto3_s3
+    from types_boto3_s3 import type_defs as s3_type_defs
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ _running: set[asyncio.Task[ResetResult]] = set()
 
 async def reset(
     database: pymongo.asynchronous.database.AsyncDatabase,
-    s3_client: S3Client,
+    s3_client: types_boto3_s3.S3Client,
     bucket: str,
     pending: dispatch.PendingWrites,
     directory: pathlib.Path,
@@ -91,7 +91,7 @@ async def reset(
 
 async def _reset(
     database: pymongo.asynchronous.database.AsyncDatabase,
-    s3_client: S3Client,
+    s3_client: types_boto3_s3.S3Client,
     bucket: str,
     pending: dispatch.PendingWrites,
     directory: pathlib.Path,
@@ -119,13 +119,13 @@ async def _reset(
     return ResetResult(deleted_objects, deleted_state_records)
 
 
-def _empty_bucket(client: S3Client, bucket: str) -> int:
+def _empty_bucket(client: types_boto3_s3.S3Client, bucket: str) -> int:
     """Deletes every object in the bucket; raises if any was refused."""
     deleted = 0
     paginator = client.get_paginator("list_objects_v2")
 
     for page in paginator.paginate(Bucket=bucket):
-        keys: list[ObjectIdentifierTypeDef] = [
+        keys: list[s3_type_defs.ObjectIdentifierTypeDef] = [
             {"Key": item["Key"]} for item in page.get("Contents", [])
         ]
 

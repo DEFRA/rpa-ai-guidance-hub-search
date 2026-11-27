@@ -306,6 +306,73 @@ class TestGate:
         await handling
         await exclusive
 
+    async def test_a_cancelled_handler_keeps_the_gate_until_its_work_has_finished(
+        self, s3_client, stores
+    ):
+        sections, staged = stores
+        gate = dispatch.PreparationGate()
+        reached = asyncio.Event()
+        release = asyncio.Event()
+
+        class BlockingDispatcher(RecordingDispatcher):
+            async def dispatch(self, job):
+                reached.set()
+                await release.wait()
+                await super().dispatch(job)
+
+        worker = preparation.PreparationWorker(
+            preparer_for=lambda readers: document_preparer.DocumentPreparer(
+                readers, sections, packed_chunking.PackedChunking(), staged
+            ),
+            dispatcher=BlockingDispatcher(),
+            client=s3_client,
+            content_bucket=BUCKET,
+            sections=sections,
+            chunk_sets=staged,
+            gate=gate,
+        )
+        _upload(s3_client)
+        handling = asyncio.create_task(worker.handle(events.published()))
+        await reached.wait()
+        exclusive = asyncio.create_task(_hold(gate))
+
+        handling.cancel()
+        await asyncio.sleep(0.05)
+
+        assert not exclusive.done()
+
+        release.set()
+        await exclusive
+
+    async def test_a_waiting_preparation_stays_out_when_another_exclusive_holder_closes_the_gate(
+        self,
+    ):
+        gate = dispatch.PreparationGate()
+        entered = asyncio.Event()
+
+        async def prepare():
+            async with gate.preparing():
+                entered.set()
+
+        first = gate.exclusive()
+        await first.__aenter__()
+        preparing = asyncio.create_task(prepare())
+        await asyncio.sleep(0)
+
+        # One holder leaves and another arrives before the waiter has woken.
+        second = gate.exclusive()
+        second_entered = asyncio.create_task(second.__aenter__())
+        await first.__aexit__(None, None, None)
+        await asyncio.sleep(0.05)
+
+        assert not entered.is_set()
+
+        await second_entered
+        await second.__aexit__(None, None, None)
+        await preparing
+
+        assert entered.is_set()
+
     async def test_a_preparation_waits_while_the_gate_is_held(self, dispatcher):
         gate = dispatch.PreparationGate()
         sections = fake_section_store.InMemorySectionStore()

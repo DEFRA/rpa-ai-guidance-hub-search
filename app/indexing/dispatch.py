@@ -50,9 +50,11 @@ class PreparationGate:
 
     @contextlib.asynccontextmanager
     async def preparing(self) -> AsyncIterator[None]:
-        await self._open.wait()
+        # Another reset can close the gate again before this wakes, so look again.
+        while self._exclusive:
+            await self._open.wait()
 
-        # No await between the wait and the count, so no exclusive holder can
+        # No await between the check and the count, so no exclusive holder can
         # slip in between them.
         self._preparing += 1
         self._idle.clear()

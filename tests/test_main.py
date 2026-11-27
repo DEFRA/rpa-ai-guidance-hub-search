@@ -112,8 +112,11 @@ def test_root():
 def test_main_sets_proxy_envs(mocker, monkeypatch):
     mocker.patch("app.entrypoints.fastapi.uvicorn.run")
 
-    monkeypatch.delenv("HTTP_PROXY", raising=False)
-    monkeypatch.delenv("HTTPS_PROXY", raising=False)
+    # `main` writes os.environ directly; setting first makes monkeypatch restore it.
+    monkeypatch.setenv("HTTP_PROXY", "")
+    monkeypatch.setenv("HTTPS_PROXY", "")
+    monkeypatch.delenv("HTTP_PROXY")
+    monkeypatch.delenv("HTTPS_PROXY")
 
     mock_config = mocker.Mock()
     mock_config.http_proxy = "http://proxy:8080"
@@ -141,8 +144,11 @@ def test_main_sets_proxy_envs(mocker, monkeypatch):
 def test_main_no_proxy_in_config(mocker, monkeypatch):
     mocker.patch("app.entrypoints.fastapi.uvicorn.run")
 
-    monkeypatch.delenv("HTTP_PROXY", raising=False)
-    monkeypatch.delenv("HTTPS_PROXY", raising=False)
+    # `main` writes os.environ directly; setting first makes monkeypatch restore it.
+    monkeypatch.setenv("HTTP_PROXY", "")
+    monkeypatch.setenv("HTTPS_PROXY", "")
+    monkeypatch.delenv("HTTP_PROXY")
+    monkeypatch.delenv("HTTPS_PROXY")
 
     mock_config = mocker.Mock()
     mock_config.http_proxy = None
