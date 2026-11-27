@@ -6,6 +6,7 @@ import fastapi.testclient
 import pytest
 
 import app.entrypoints.fastapi
+from app.admin import pending_writes
 
 client = fastapi.testclient.TestClient(app.entrypoints.fastapi.create_app())
 
@@ -92,7 +93,11 @@ def test_lifespan(mocker):
             config.index_refresh_interval_seconds,
         )
         indexing_queue.assert_called_once_with(
-            config, mocker.sentinel.sqs, mocker.sentinel.s3, index_builds.return_value
+            config,
+            mocker.sentinel.sqs,
+            mocker.sentinel.s3,
+            index_builds.return_value,
+            pending_writes.get_pending_writes(),
         )
 
     assert stopped.is_set()

@@ -9,6 +9,8 @@ import fastapi
 import uvicorn
 
 from app import config as app_config
+from app.admin import pending_writes
+from app.admin import router as admin_router
 from app.common import mongo, s3, sqs, tracing
 from app.entrypoints import queue_consumers
 from app.health import router as health_router
@@ -44,7 +46,11 @@ async def lifespan(_: fastapi.FastAPI) -> AsyncGenerator[None]:
 
     try:
         async with queue_consumers.indexing_queue(
-            config, sqs_client, s3_client, index_builds
+            config,
+            sqs_client,
+            s3_client,
+            index_builds,
+            pending_writes.get_pending_writes(),
         ):
             yield
     finally:
@@ -64,6 +70,8 @@ def create_app(
 ) -> fastapi.FastAPI:
     """Build the app, mounting the ingestion routes only in `http` mode.
 
+    The admin routes are mounted in either mode.
+
     The queue consumers run from the lifespan, in either mode.
 
     A factory rather than a module-level app, so importing this module never
@@ -80,6 +88,7 @@ def create_app(
     app.add_middleware(tracing.TraceIdMiddleware, header=config.tracing_header)
     app.include_router(health_router.router)
     app.include_router(search_v1_router.router)
+    app.include_router(admin_router.router)
 
     if ingestion_mode is app_config.IngestionMode.HTTP:
         app.include_router(ingestion_router.router)

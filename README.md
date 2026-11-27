@@ -249,6 +249,9 @@ indexing (write)   search (read)  ->  search/v1 (GET /v1/search)
   (always UUIDv7). A source without its own, such as GOV.UK content, mints
   deterministic UUIDv5s under its own namespace (`ids.minted_id`), so the
   same content always gets the same ids and sources never collide.
+- **`app/admin/`** holds operator routes. `index_reset.py` wipes the index and
+  its storage (holding the writer's turn), `pending_writes.py` is the process's
+  one `PendingWrites` the indexing queue's dispatcher and the reset share.
 - **`app/ingestion/`** is how guide versions arrive: the HTTP routes, the
   indexing queue's guide events (`models.py`) they send, and the preparation
   that handles each (see [Indexing](#indexing)).
@@ -328,6 +331,7 @@ mypy refuses one where another belongs:
 | `GET: /v1/search`               | Word search (`q`, optionally inside one document with `tag`, paged by `limit` and `offset`; `group=document` pages documents instead, each with its best `sections`) or title search (`title`); published documents only for now |
 | `PUT: /documents/{documentId}/versions/{versionId}` | Queue a version to be indexed (202). The body carries `contentUrl` (`s3://<managed-docs bucket>/…/content.md`), `status`, `occurredAt`, `versionNumber` and the CMS `metadata`. Inline `content` is refused (422): a whole document can be larger than a queue message. `status` must be `published` (the index holds one version per document, so anything else is refused with 422), and `metadata.guideTitle` is required: it is the indexed title, never the Markdown's `# ` line. A version older than the one indexed is skipped. 503 if the request could not be queued. `http` mode only. |
 | `DELETE: /documents/{documentId}/versions/{versionId}` | Queue a version's removal at every status (202): from the index if it is the version indexed, and its staged files. 503 if it could not be queued. `http` mode only. |
+| `POST: /admin/index/reset` | Wipe the whole index so it can be rebuilt: every `index_state` record, then every object in the search-store bucket, then this replica serves an empty index (other replicas follow on their next poll). Returns 200 `{deletedObjects, deletedStateRecords}` once finished; 503 if it failed, and it is idempotent, so send it again. **Not authenticated**: it relies on network trust, like the ingestion routes. Mounted in both ingestion modes. |
 
 ## Indexing
 
