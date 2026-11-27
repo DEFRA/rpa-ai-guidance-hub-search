@@ -80,3 +80,15 @@ class TestLines:
             "Apply",
             "Record",
         )
+
+    def test_reads_a_list_after_two_italic_lines(self):
+        assert tables.lines("| *Intro*<br>*More*<br>- Apply<br>- Record |") == (
+            "Intro More",
+            "Apply",
+            "Record",
+        )
+
+    def test_reads_a_list_after_a_link_whose_address_holds_a_star(self):
+        assert tables.lines(
+            "| [Intro](https://example.com/?q=*)<br>- Apply<br>- Record |"
+        ) == ("Intro", "Apply", "Record")

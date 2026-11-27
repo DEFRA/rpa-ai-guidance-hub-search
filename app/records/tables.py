@@ -70,7 +70,7 @@ def _lines_of(cell: str) -> tuple[str, ...]:
     `tiptap/tables.js`, `promote`)."""
     parts = _closed_back(_BREAK.split(cell.strip()))
     items = [
-        part.startswith(_MARK) and not _open_marks("".join(parts[:at]))
+        part.startswith(_MARK) and not _open_marks("<br>".join(parts[:at]))
         for at, part in enumerate(parts)
     ]
     first = next((at for at, item in enumerate(items) if item), None)
@@ -90,7 +90,7 @@ def _closed_back(parts: list[str]) -> list[str]:
     fixed = parts[:1]
     for part in parts[1:]:
         rest = part
-        while (mark := _closing_mark("".join(fixed), rest)) is not None:
+        while (mark := _closing_mark("<br>".join(fixed), rest)) is not None:
             fixed[-1] += mark
             rest = rest.removeprefix(mark)
         fixed.append(rest)
@@ -128,7 +128,7 @@ def _open_marks(text: str) -> set[str]:
     """The marks opened in `text` and still open at its end, so that what follows is
     styled: bold, italics, strikethrough, a link's or colour span's words, or
     underline, superscript or subscript. The converter writes each mark in pairs."""
-    plain = _unescaped(text)
+    plain = _without_addresses(_unescaped(text))
     counts = {
         "**": plain.count("**") % 2,
         "*": plain.replace("**", "").count("*") % 2,
@@ -139,6 +139,21 @@ def _open_marks(text: str) -> set[str]:
         f"<{tag}>": plain.count(f"<{tag}>") - plain.count(f"</{tag}>") for tag in _TAGS
     }
     return {mark for mark, count in counts.items() if count}
+
+
+def _without_addresses(text: str) -> str:
+    """`text` without where its links and pictures go, whose characters mark
+    nothing: `[words](address)` is read as `[words]`."""
+    kept: list[str] = []
+    at = 0
+    while (start := text.find("](", at)) >= 0:
+        address = _link_end(text[start:])
+        if address is None:
+            break
+        kept.append(text[at : start + 1])
+        at = start + len(address)
+    kept.append(text[at:])
+    return "".join(kept)
 
 
 def _unescaped(text: str) -> str:
