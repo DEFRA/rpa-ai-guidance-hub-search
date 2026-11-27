@@ -61,7 +61,7 @@ def _stored(client, bucket):
 
 def _staged(client, bucket):
     job = guides.job()
-    key = chunk_sets.key("packed-800-v2", job.document_id, job.version_id, job.status)
+    key = chunk_sets.key("packed-800-v3", job.document_id, job.version_id, job.status)
 
     return _read(client, bucket, key)
 

@@ -21,7 +21,7 @@ def _written(job, trace_id=None):
 
 class TestFromJob:
     def test_a_prepared_version_names_its_chunk_set_by_bucket_and_key(self):
-        job = events.apply_job("staged/packed-800-v2/d/v/published.jsonl")
+        job = events.apply_job("staged/packed-800-v3/d/v/published.jsonl")
 
         written = _written(job, trace_id="t-1")
 
@@ -34,10 +34,10 @@ class TestFromJob:
             "documentId": str(guides.DOCUMENT_ID),
             "versionId": str(guides.VERSION_ID),
             "status": "published",
-            "strategy": "packed-800-v2",
+            "strategy": "packed-800-v3",
             "chunkSet": {
                 "bucket": BUCKET,
-                "key": "staged/packed-800-v2/d/v/published.jsonl",
+                "key": "staged/packed-800-v3/d/v/published.jsonl",
             },
         }
 
