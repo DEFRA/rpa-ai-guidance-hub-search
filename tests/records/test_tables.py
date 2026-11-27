@@ -92,3 +92,9 @@ class TestLines:
         assert tables.lines(
             "| [Intro](https://example.com/?q=*)<br>- Apply<br>- Record |"
         ) == ("Intro", "Apply", "Record")
+
+    def test_reads_a_list_whose_marks_are_escaped(self):
+        assert tables.lines("| \\- Apply<br>\\- Record |") == ("Apply", "Record")
+
+    def test_reads_a_list_whose_marks_are_entities(self):
+        assert tables.lines("| &#45; Apply<br>&#45; Record |") == ("Apply", "Record")

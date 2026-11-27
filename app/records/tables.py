@@ -12,7 +12,8 @@ from app.records import plain_text
 
 _DELIMITER = re.compile(r"^\|(?:\s*:?-+:?\s*\|)+\s*$")
 _BREAK = re.compile(r"<br\s*/?>")
-_MARK = "- "
+# A list item's mark, its dash written plain, escaped or as an entity.
+_MARKS = ("- ", "\\- ", "&#45; ", "&#x2d; ", "&#x2D; ")
 _TAGS = ("u", "sup", "sub")
 # Each mark that can close at the start of a part, and the mark it closes.
 _CLOSERS = (
@@ -70,7 +71,7 @@ def _lines_of(cell: str) -> tuple[str, ...]:
     `tiptap/tables.js`, `promote`)."""
     parts = _closed_back(_BREAK.split(cell.strip()))
     items = [
-        part.startswith(_MARK) and not _open_marks("<br>".join(parts[:at]))
+        _mark_of(part) is not None and not _open_marks("<br>".join(parts[:at]))
         for at, part in enumerate(parts)
     ]
     first = next((at for at, item in enumerate(items) if item), None)
@@ -78,9 +79,16 @@ def _lines_of(cell: str) -> tuple[str, ...]:
         groups = [cell]
     else:
         lead = ["<br>".join(parts[:first])] if first else []
-        groups = lead + [part.removeprefix(_MARK) for part in parts[first:]]
+        groups = lead + [
+            part.removeprefix(_mark_of(part) or "") for part in parts[first:]
+        ]
     found = (plain_text.strip_inline(group) for group in groups)
     return tuple(line for line in found if line)
+
+
+def _mark_of(part: str) -> str | None:
+    """The list item's mark that `part` starts with, however its dash is written."""
+    return next((mark for mark in _MARKS if part.startswith(mark)), None)
 
 
 def _closed_back(parts: list[str]) -> list[str]:
