@@ -17,3 +17,91 @@ class TestRows:
 
     def test_reads_a_break_in_a_cell_as_a_space(self):
         assert tables.rows("| Print<br>it |") == (("Print it",),)
+
+    def test_reads_a_list_in_a_cell_as_its_items_without_their_marks(self):
+        assert tables.rows("| Do | - Apply<br>- Record |") == (("Do", "Apply Record"),)
+
+
+class TestLines:
+    """Each cell's lines, as the guide page shows them: a list in a cell is its
+    items, each on a line of its own, without their marks."""
+
+    def test_reads_each_cell_as_a_line(self):
+        assert tables.lines("| Item | Pay |\n|---|---|\n| Late | 5 |") == (
+            "Item",
+            "Pay",
+            "Late",
+            "5",
+        )
+
+    def test_reads_each_item_of_a_list_in_a_cell_as_a_line_without_its_mark(self):
+        assert tables.lines("| Do | - Apply<br>- Record |") == ("Do", "Apply", "Record")
+
+    def test_reads_the_lines_before_a_cells_list_as_one_line(self):
+        assert tables.lines("| Steps:<br>first<br>- Apply<br>- Record |") == (
+            "Steps: first",
+            "Apply",
+            "Record",
+        )
+
+    def test_reads_a_cell_as_one_line_when_a_line_after_a_mark_has_none(self):
+        assert tables.lines("| - Apply<br>then record |") == ("- Apply then record",)
+
+    def test_reads_a_number_as_words_not_as_a_mark(self):
+        assert tables.lines("| 1. Apply<br>2. Record |") == ("1. Apply 2. Record",)
+
+    def test_reads_a_cell_as_one_line_when_bold_runs_on_across_its_marks(self):
+        assert tables.lines("| **Intro<br>- Apply<br>- Record** |") == (
+            "Intro - Apply - Record",
+        )
+
+    def test_reads_a_cell_as_one_line_when_a_link_runs_on_across_its_marks(self):
+        assert tables.lines("| [Intro<br>- Apply<br>- Record](#steps) |") == (
+            "Intro - Apply - Record",
+        )
+
+    def test_reads_a_list_after_bold_closed_before_its_marks(self):
+        assert tables.lines("| **Intro**<br>- Apply<br>- Record |") == (
+            "Intro",
+            "Apply",
+            "Record",
+        )
+
+    def test_reads_a_list_after_bold_closed_just_after_a_break(self):
+        assert tables.lines("| **Intro<br>**- Apply<br>- Record |") == (
+            "Intro",
+            "Apply",
+            "Record",
+        )
+
+    def test_reads_a_list_after_a_link_closed_just_after_a_break(self):
+        assert tables.lines("| [Intro<br>](#steps)- Apply<br>- Record |") == (
+            "Intro",
+            "Apply",
+            "Record",
+        )
+
+    def test_reads_a_list_after_two_italic_lines(self):
+        assert tables.lines("| *Intro*<br>*More*<br>- Apply<br>- Record |") == (
+            "Intro More",
+            "Apply",
+            "Record",
+        )
+
+    def test_reads_a_list_after_a_link_whose_address_holds_a_star(self):
+        assert tables.lines(
+            "| [Intro](https://example.com/?q=*)<br>- Apply<br>- Record |"
+        ) == ("Intro", "Apply", "Record")
+
+    def test_reads_a_list_whose_marks_are_escaped(self):
+        assert tables.lines("| \\- Apply<br>\\- Record |") == ("Apply", "Record")
+
+    def test_reads_a_list_whose_marks_are_entities(self):
+        assert tables.lines("| &#45; Apply<br>&#45; Record |") == ("Apply", "Record")
+
+    def test_reads_a_list_after_italics_around_an_escaped_star(self):
+        assert tables.lines("| *\\**<br>- Apply<br>- Record |") == (
+            "*",
+            "Apply",
+            "Record",
+        )
