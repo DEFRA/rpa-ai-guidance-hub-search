@@ -29,6 +29,8 @@ _SPAN_ENDS = ("]{.red}", "]{.blue}")
 _ESCAPABLE = frozenset("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
 _ESCAPED_PIPE = "\\|"
 _PIPE_PLACEHOLDER = "\x00"
+# What stands for an escaped character while marks are counted.
+_ESCAPE_STAND_IN = "\x01"
 
 
 def rows(markdown: str) -> tuple[tuple[str, ...], ...]:
@@ -165,11 +167,13 @@ def _without_addresses(text: str) -> str:
 
 
 def _unescaped(text: str) -> str:
-    """`text` without its escaped characters, which mark nothing."""
+    """`text` with each escaped character, which marks nothing, as a stand-in."""
     kept: list[str] = []
     at = 0
     while at < len(text):
         if text[at] == "\\" and at + 1 < len(text) and text[at + 1] in _ESCAPABLE:
+            # A stand-in, so that marks either side of it do not run together.
+            kept.append(_ESCAPE_STAND_IN)
             at += 2
             continue
         kept.append(text[at])

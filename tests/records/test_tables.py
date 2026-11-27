@@ -98,3 +98,10 @@ class TestLines:
 
     def test_reads_a_list_whose_marks_are_entities(self):
         assert tables.lines("| &#45; Apply<br>&#45; Record |") == ("Apply", "Record")
+
+    def test_reads_a_list_after_italics_around_an_escaped_star(self):
+        assert tables.lines("| *\\**<br>- Apply<br>- Record |") == (
+            "*",
+            "Apply",
+            "Record",
+        )
