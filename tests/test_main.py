@@ -62,6 +62,10 @@ def test_lifespan(mocker):
         "app.entrypoints.queue_consumers.indexing_queue",
         return_value=mocker.MagicMock(),
     )
+    index_sync_queue = mocker.patch(
+        "app.entrypoints.queue_consumers.index_sync_queue",
+        return_value=mocker.MagicMock(),
+    )
     load = mocker.patch("app.index.active_index.load", mocker.AsyncMock())
 
     stopped = asyncio.Event()
@@ -92,6 +96,9 @@ def test_lifespan(mocker):
             config.index_refresh_interval_seconds,
         )
         indexing_queue.assert_called_once_with(
+            config, mocker.sentinel.sqs, mocker.sentinel.s3
+        )
+        index_sync_queue.assert_called_once_with(
             config, mocker.sentinel.sqs, mocker.sentinel.s3, index_builds.return_value
         )
 

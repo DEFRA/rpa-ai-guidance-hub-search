@@ -2,9 +2,10 @@
 
 `IndexJob` asks for a version to be prepared: read, sectioned and chunked.
 Preparing it produces an `ApplyJob`, which asks for the staged chunks to be
-written to the index. The two run as separate steps so that, later, any number
-of workers can prepare while a single writer applies. `RemoveJob` asks the
-same writer to take a version out of the index.
+written to the index. The two run as separate steps, so any number of workers
+prepare while a single writer applies (`ingestion.preparation`, then
+`apply.index_writer`). `RemoveJob` asks the same writer to take a version out
+of the index.
 """
 
 import dataclasses

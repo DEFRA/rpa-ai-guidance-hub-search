@@ -60,7 +60,7 @@ For local development - see [instructions below](#local-development).
 | `INGESTION_MODE` | `http` mounts the [ingestion routes](#api-endpoints) for the CMS to push document versions to; `s3` leaves them out. The queue consumers and the `index-document` script work in both. | `http` |
 | `INDEX_REFRESH_INTERVAL_SECONDS` | How often each replica checks MongoDB for a newer active index build and swaps it in. | `60` |
 | `SEARCH_INDEXING_SQS_QUEUE_URL` | The indexing queue: guide events to prepare (CloudEvents; see [Indexing](#indexing)). Standard. | required |
-| `SEARCH_INDEX_SYNC_SQS_QUEUE_URL` | The index sync queue: jobs for the index's single writer. Must be FIFO. Not used yet: the index is written in process (see [Indexing](#indexing)). | required |
+| `SEARCH_INDEX_SYNC_SQS_QUEUE_URL` | The index sync queue: jobs for the index's single writer. Must be FIFO. | required |
 | `SQS_SHUTDOWN_TIMEOUT_SECONDS` | How long the queue consumers wait for messages in flight on shutdown; uvicorn waits 5 seconds longer. | `20` |
 | `MANAGED_DOCS_S3_BUCKET` | The only bucket a version's `contentUrl` may name; the API writes each version's `content.md` there. | `rpa-ai-guidance-hub-managed-docs` |
 | `SEARCH_STORE_S3_BUCKET` | Where sections, staged chunk sets and index builds are kept | `rpa-ai-guidance-hub-search-store` |
@@ -253,8 +253,8 @@ indexing (write)   search (read)  ->  search/v1 (GET /v1/search)
   indexing queue's guide events (`models.py`) they send, and the preparation
   that handles each (see [Indexing](#indexing)).
 - **`app/indexing/`** indexes a version in two steps (`stages.py`), so that
-  preparing can scale out behind a single writer. `models.py` holds the index
-  sync queue's events, which nothing sends yet:
+  preparing scales out while a single writer applies. `models.py` holds the
+  index sync queue's events, and `index_sync.py` sends them:
   - **`prepare/`** turns an `IndexJob` into an `ApplyJob`. A `SourceReader` per
     source type reads one version into a `SourceDocument` (a guide's
     `content.md` today, with `guide_cms` modelling the CMS API's guide and
@@ -331,9 +331,9 @@ mypy refuses one where another belongs:
 
 ## Indexing
 
-Guide versions arrive on the indexing queue, and each replica prepares them and
-writes the index itself. The queue belongs to the sub-domain it reaches, whose
-`models.py` defines its events; its consumer is an entry point
+Indexing runs through two SQS queues, so any number of replicas prepare while
+only one writes to the index. Each queue belongs to the sub-domain it reaches,
+whose `models.py` defines its events; the consumers are entry points
 (`app/entrypoints/queue_consumers.py`), like the HTTP routes.
 
 1. **Ingestion routes → indexing queue** (`app/ingestion/`). Each route puts a
@@ -344,18 +344,18 @@ writes the index itself. The queue belongs to the sub-domain it reaches, whose
    messages at once). It reads the version's `content.md` from the managed-docs
    bucket, stores its sections, and stages its chunks as one object in the
    search-store bucket (`staged/{strategy}/{documentId}/{versionId}/{status}.jsonl`,
-   written in one PUT, so it is whole or absent).
-3. **Writing the index, in process** (`app/indexing/dispatch.py`). The prepared
-   job goes to the replica's `BatchingDispatcher`, which publishes every job
-   waiting at once, and the message is acknowledged only once its job is
-   written. A deletion removes the version from the index, then deletes its
-   sections and staged chunk set.
-
-**Limitation:** as with the ingestion routes before, every replica writes the
-index. With more than one replica, two publishes at once can lose one's build
-swap. The index sync queue (FIFO, one message group) will make one writer of
-all replicas: its events are defined below, but nothing sends or consumes
-them yet.
+   written in one PUT, so it is whole or absent). Then it puts an event naming
+   that object on the index sync queue. A deletion is forwarded as a removal.
+3. **Index sync queue (FIFO)** (`app/indexing/`). Every event is in one message
+   group, so SQS hands them to one receiver at a time across all replicas. Each
+   is deduplicated by its event's `id`, which is derived from what the event says,
+   so a retried preparation sends one event.
+4. **Index writer** (`app/indexing/apply/index_writer.py`, one receiver at a
+   time, up to 10 messages). It publishes the batch's jobs to the index in one
+   publish, then deletes each removed version's sections and staged chunk set.
+   The first message that fails, and every one after it in the batch, are left
+   to be retried, so the queue's order holds; rewriting a job already written
+   changes nothing.
 
 A message whose handler fails is retried after its visibility timeout, and moved
 to the queue's `-deadletter` queue after 3 receives: content that is missing or
@@ -365,7 +365,7 @@ Failures are logged and counted (`IngestionFailed`, with `ENABLE_METRICS`).
 
 ### Events
 
-Every message on either queue is a [CloudEvents 1.0](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/spec.md)
+Every message on both queues is a [CloudEvents 1.0](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/spec.md)
 event in structured JSON mode: the whole event is the message body. All of them
 subclass the one CloudEvents base in `app/common/cloudevents.py`. The contract is
 the AsyncAPI 3.0 document [`docs/asyncapi.yaml`](docs/asyncapi.yaml): both queues,

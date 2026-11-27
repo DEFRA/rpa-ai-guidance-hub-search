@@ -8,6 +8,9 @@ way `tests.support.mongo` starts MongoDB: one container for the whole session, i
 as on a laptop. Unlike Mongo, it is still an imitation of AWS, so these tests check
 our store and leave the emulator's own behaviour alone.
 
+The end-to-end indexing test runs against floci's SQS too, on plain queues of its
+own (`floci_queues`).
+
 The image is the one both compose files pin, so the tests and the local stack run
 the same floci.
 """
@@ -75,3 +78,31 @@ def floci_s3(floci_endpoint: str) -> Iterator[tuple[Any, str]]:
     for stored in listing.get("Contents", []):
         client.delete_object(Bucket=bucket, Key=stored["Key"])
     client.delete_bucket(Bucket=bucket)
+
+
+@pytest.fixture
+def floci_sqs(floci_endpoint: str) -> Any:
+    return boto3.client(
+        "sqs",
+        endpoint_url=floci_endpoint,
+        region_name="eu-west-2",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",  # noqa: S106 - floci takes any credentials
+    )
+
+
+@pytest.fixture
+def floci_queues(floci_sqs: Any) -> Iterator[tuple[str, str]]:
+    """A fresh indexing queue and FIFO index sync queue, as (url, url)."""
+    name = f"test-{uuid.uuid4().hex[:12]}"
+    urls = (
+        floci_sqs.create_queue(QueueName=f"{name}_indexing")["QueueUrl"],
+        floci_sqs.create_queue(
+            QueueName=f"{name}_index_sync.fifo", Attributes={"FifoQueue": "true"}
+        )["QueueUrl"],
+    )
+
+    yield urls
+
+    for url in urls:
+        floci_sqs.delete_queue(QueueUrl=url)

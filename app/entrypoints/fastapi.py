@@ -43,8 +43,11 @@ async def lifespan(_: fastapi.FastAPI) -> AsyncGenerator[None]:
     )
 
     try:
-        async with queue_consumers.indexing_queue(
-            config, sqs_client, s3_client, index_builds
+        async with (
+            queue_consumers.indexing_queue(config, sqs_client, s3_client),
+            queue_consumers.index_sync_queue(
+                config, sqs_client, s3_client, index_builds
+            ),
         ):
             yield
     finally:
